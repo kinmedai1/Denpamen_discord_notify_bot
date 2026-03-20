@@ -89,8 +89,22 @@ class TwitterChecker:
             raw_text = entry.get("summary", "") or entry.get("description", "")
             clean_text = self._strip_html(raw_text)
 
-            # 画像URLの抽出
+            # 画像URLの抽出 (HTML内部)
             images = self._extract_images_from_html(raw_text)
+
+            # RSS.app 等の外部サービスは media_content や enclosures に画像を配置することがある
+            if not images and hasattr(entry, "media_content"):
+                for media in entry.media_content:
+                    url = media.get("url")
+                    if url and (media.get("medium") == "image" or not media.get("medium")):
+                        images.append(url)
+
+            if not images and hasattr(entry, "enclosures"):
+                for enc in entry.enclosures:
+                    href = enc.get("href")
+                    enc_type = enc.get("type", "")
+                    if href and (enc_type.startswith("image/") or href.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp'))):
+                        images.append(href)
 
             # 日時
             published = entry.get("published", "")
