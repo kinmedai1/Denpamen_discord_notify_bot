@@ -35,5 +35,6 @@ jobs:
         env:
           DISCORD_TWITTER_WEBHOOK_URL: ${{ secrets.DISCORD_TWITTER_WEBHOOK_URL }}
           TWITTER_USERNAME: ${{ secrets.TWITTER_USERNAME }}
+          TWITTER_RSS_URL: ${{ secrets.TWITTER_RSS_URL }}
         run: |
           python src/twitter_notify_action.py
