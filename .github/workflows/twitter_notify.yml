@@ -1,0 +1,39 @@
+name: 🐦 Twitter新着ツイート通知
+
+on:
+  schedule:
+    # 1時間ごとに実行（JST の毎時0分）
+    - cron: '0 * * * *'
+  # 手動実行も可能
+  workflow_dispatch:
+
+jobs:
+  check-twitter:
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Python をセットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 依存パッケージをインストール
+        run: |
+          pip install -r requirements.txt
+
+      - name: 既知ツイートデータのキャッシュを復元
+        uses: actions/cache@v4
+        with:
+          path: data/known_tweets.json
+          key: known-tweets-${{ github.run_id }}
+          restore-keys: |
+            known-tweets-
+
+      - name: Twitter新着チェック＆通知を実行
+        env:
+          DISCORD_TWITTER_WEBHOOK_URL: ${{ secrets.DISCORD_TWITTER_WEBHOOK_URL }}
+          TWITTER_USERNAME: ${{ secrets.TWITTER_USERNAME }}
+        run: |
+          python src/twitter_notify_action.py

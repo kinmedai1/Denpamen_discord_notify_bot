@@ -16,6 +16,8 @@
 8. [トラブルシューティング](#8-トラブルシューティング)
 9. [公式サイト新着通知の設定（オプション）](#9-公式サイト新着通知の設定オプション)
 10. [定期（永遠）イベントの自動生成（オプション）](#10-定期永遠イベントの自動生成オプション)
+11. [公式Twitter新着通知の設定（オプション）](#11-公式twitter新着通知の設定オプション)
+12. [YouTube新着動画通知の設定（オプション）](#12-youtube新着動画通知の設定オプション)
 
 ---
 
@@ -68,6 +70,8 @@ Bot の操作と通知を分離するため、2つのチャンネルを作成し
 | `#bot操作` | ボタン操作 | 固定メッセージ（コントロールパネル）が表示されるチャンネル |
 | `#通知` | 通知受信 | 定期通知・リマインダーが投稿されるチャンネル |
 | `#電波人間公式サイト通知` | サイト更新 | 公式サイトの新着記事が通知されるチャンネル（オプション） |
+| `#電波人間Twitter通知` | Twitter更新 | 公式Twitterの新着ツイートが通知されるチャンネル（オプション） |
+| `#電波人間YouTube通知` | YouTube更新 | 公式YouTubeの新着動画が通知されるチャンネル（オプション） |
 
 **作成手順:**
 1. サーバーで右クリック → **「チャンネルを作成」**
@@ -184,6 +188,22 @@ NOTIFICATION_CHANNEL_ID=987654321098765432
 # Google Sheets（手順3.1で取得）
 GOOGLE_SHEETS_ID=your_spreadsheet_id_here
 GOOGLE_SERVICE_ACCOUNT_FILE=service_account.json
+
+# --- オプション機能の設定（使用しない場合は空でOK） ---
+
+# 公式サイト通知用 Webhook URL（手順9.1）
+DISCORD_WEBSITE_WEBHOOK_URL=your_website_webhook_url_here
+
+# 公式Twitter通知設定（手順11.1、11.2）
+DISCORD_TWITTER_WEBHOOK_URL=your_twitter_webhook_url_here
+TWITTER_USERNAME=denpaningen
+# RSSHUB_BASE_URL=https://rsshub.app
+
+# YouTube新着動画通知設定（手順12.1、12.2）
+DISCORD_YOUTUBE_WEBHOOK_URL=your_youtube_webhook_url_here
+YOUTUBE_CHANNEL_ID=your_youtube_channel_id_here
+
+# ------------------------------------------------
 
 # 固定メッセージID（初回起動時に自動設定されます）
 CONTROL_MESSAGE_ID=
@@ -427,7 +447,39 @@ GitHub Actions からDiscordやGoogle Sheetsにアクセスするために、機
 3. **Secret** に 公式サイト通知用の Webhook URL（手順9.1で取得）を貼り付け
 4. **「Add secret」** をクリック
 
-> ✅ 設定完了後、Secrets 一覧に最大6つのシークレットが表示されていれば成功です。
+#### Secret ⑦: DISCORD_TWITTER_WEBHOOK_URL（オプション）
+
+1. **「New repository secret」** をクリック
+2. **Name** に `DISCORD_TWITTER_WEBHOOK_URL` と入力
+3. **Secret** に Twitter通知用の Webhook URL（手順11.1で取得）を貼り付け
+4. **「Add secret」** をクリック
+
+#### Secret ⑧: TWITTER_USERNAME（オプション）
+
+1. **「New repository secret」** をクリック
+2. **Name** に `TWITTER_USERNAME` と入力
+3. **Secret** に 監視対象のTwitterユーザー名（@なし）を入力（例: `denpaningen`）
+4. **「Add secret」** をクリック
+
+#### Secret ⑨: DISCORD_YOUTUBE_WEBHOOK_URL（オプション）
+
+1. **「New repository secret」** をクリック
+2. **Name** に `DISCORD_YOUTUBE_WEBHOOK_URL` と入力
+3. **Secret** に YouTube通知用の Webhook URL（手順12.1で取得）を貼り付け
+4. **「Add secret」** をクリック
+
+#### Secret ⑩: YOUTUBE_CHANNEL_ID（オプション）
+
+1. **「New repository secret」** をクリック
+2. **Name** に `YOUTUBE_CHANNEL_ID` と入力
+3. **Secret** に 監視対象のYouTubeチャンネルID（`UC` で始まる文字列）を貼り付け
+4. **「Add secret」** をクリック
+
+> 💡 **YouTubeチャンネルIDの確認方法:**
+> YouTubeチャンネルのページを開き、URLの `https://www.youtube.com/channel/UCxxxxxxxxxx` の `UCxxxxxxxxxx` 部分がチャンネルIDです。
+> チャンネルが `@ハンドル名` 形式のURLの場合は、チャンネルページのソースコードで `browse_id` を検索するか、[Comment Picker](https://commentpicker.com/youtube-channel-id.php) 等のツールで調べることができます。
+
+> ✅ 設定完了後、Secrets 一覧に最大10個のシークレットが表示されていれば成功です。
 > なお、登録した値は**二度と表示されません**（更新は可能です）。
 
 ### 7.5 通知スケジュールの変更
@@ -541,3 +593,84 @@ on:
 
 これらはDiscordの「📋 一覧」コマンドや、定期通知のガントチャートなどの一覧に自動で組み込まれて表示されます。
 ※スプレッドシートには直接書き込まれないため、データの肥大化を防げます。
+
+---
+
+## 11. 公式Twitter新着通知の設定（オプション）
+
+公式Twitterアカウント（@denpaningen）の新着ツイートを1時間ごとにチェックし、新着があればDiscordに通知する機能です。
+RSSHub（オープンソースのRSS変換サービス）を利用しており、Twitter APIキーは不要です。
+
+### 11.1 専用チャンネルの作成と Webhook 設定
+
+1. Discord サーバーで新しいチャンネルを作成（例: `#電波人間Twitter通知`）
+2. 作成したチャンネルの **設定** → **連携サービス** → **ウェブフックを作成**
+3. **「ウェブフックURLをコピー」** しておく
+
+### 11.2 GitHub Secrets の設定
+
+手順7.4と同じ方法で、以下の2つのシークレットを追加してください：
+
+| Secret名 | 値 |
+|-----------|----|
+| `DISCORD_TWITTER_WEBHOOK_URL` | 手順11.1でコピーしたWebhook URL |
+| `TWITTER_USERNAME` | `denpaningen`（@なし） |
+
+### 11.3 動作の仕組み
+
+- **定期実行**: 1時間ごとにRSSHub経由でTwitterの投稿をチェックします（GitHub Actions `twitter_notify.yml`）
+- **新着通知**: 新しいツイートが検出されると、指定したチャンネルに通知が届きます
+- **初回実行時**: 初回実行時は、全ての既存ツイートを「既知」として登録するため、通知は送信されません（大量通知を防ぐため）
+
+### 11.4 RSSHub インスタンスの変更（任意）
+
+デフォルトでは公開インスタンス（`https://rsshub.app`）を使用しますが、セルフホスト環境がある場合は GitHub Secrets に以下を追加で設定できます：
+
+| Secret名 | 値 |
+|-----------|----|
+| `RSSHUB_BASE_URL` | セルフホストのRSSHub URL（例: `https://rsshub.example.com`） |
+
+### 11.5 手動テスト
+
+1. GitHub リポジトリの **Actions** タブを開く
+2. 左側の **「🐦 Twitter新着ツイート通知」** を選択
+3. **「Run workflow」** → **「Run workflow」** をクリック
+4. `#電波人間Twitter通知` チャンネルに通知が届くことを確認
+
+> ⚠️ **注意:** RSSHubの公開インスタンスは混雑やメンテナンスにより一時的に利用できない場合があります。
+> 安定した運用には RSSHub のセルフホスティングを検討してください。
+
+---
+
+## 12. YouTube新着動画通知の設定（オプション）
+
+公式YouTubeチャンネルの新着動画を1時間ごとにチェックし、新着があればDiscordに通知する機能です。
+YouTubeのRSSフィードを利用しており、APIキーは不要です。
+
+### 12.1 専用チャンネルの作成と Webhook 設定
+
+1. Discord サーバーで新しいチャンネルを作成（例: `#電波人間YouTube通知`）
+2. 作成したチャンネルの **設定** → **連携サービス** → **ウェブフックを作成**
+3. **「ウェブフックURLをコピー」** しておく
+
+### 12.2 GitHub Secrets の設定
+
+手順7.4と同じ方法で、以下の2つのシークレットを追加してください：
+
+| Secret名 | 値 |
+|-----------|----|
+| `DISCORD_YOUTUBE_WEBHOOK_URL` | 手順12.1でコピーしたWebhook URL |
+| `YOUTUBE_CHANNEL_ID` | YouTubeチャンネルID（`UC` で始まる文字列） |
+
+### 12.3 動作の仕組み
+
+- **定期実行**: 1時間ごとにYouTubeのRSSフィードをチェックします（GitHub Actions `youtube_notify.yml`）
+- **新着通知**: 新しい動画が検出されると、サムネイル付きで指定したチャンネルに通知が届きます
+- **初回実行時**: 初回実行時は、全ての既存動画を「既知」として登録し、古い順に全動画を通知します
+
+### 12.4 手動テスト
+
+1. GitHub リポジトリの **Actions** タブを開く
+2. 左側の **「🎬 YouTube新着動画通知」** を選択
+3. **「Run workflow」** → **「Run workflow」** をクリック
+4. `#電波人間YouTube通知` チャンネルに通知が届くことを確認
