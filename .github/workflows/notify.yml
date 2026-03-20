@@ -1,0 +1,43 @@
+name: 📅 今日のスケジュール通知
+
+on:
+  schedule:
+    # 毎日 15:00 JST (UTC 06:00) に実行
+    - cron: '0 6 * * *'
+  # 手動実行も可能
+  workflow_dispatch:
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Python をセットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 依存パッケージをインストール
+        run: |
+          pip install -r requirements.txt
+
+      - name: 日本語フォントをインストール
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk
+
+      - name: サービスアカウントキーを作成
+        run: |
+          echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > service_account.json
+
+      - name: 通知スクリプトを実行
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+          GOOGLE_SERVICE_ACCOUNT_FILE: service_account.json
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          NOTIFICATION_CHANNEL_ID: ${{ secrets.NOTIFICATION_CHANNEL_ID }}
+        run: |
+          python src/notify_action.py

@@ -1,0 +1,46 @@
+# 環境変数
+.env
+
+# Google サービスアカウントキー
+service_account.json
+*.json
+!config.json
+!package.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+.venv/
+env/
+
+# ログファイル
+bot.log
+*.log*
+
+# 生成ファイル
+*.png
+*.jpg
+
+# 起動スクリプト
+start_bot.bat
+
+# ドキュメント
+docs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# データディレクトリ（ディレクトリは保持し中身は無視）
+data/*
+!data/.gitkeep

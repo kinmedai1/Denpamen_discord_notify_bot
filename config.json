@@ -1,0 +1,99 @@
+{
+  "timezone": "Asia/Tokyo",
+  "weekly_notifications": [
+    {
+      "day": "monday",
+      "time": "09:00",
+      "message": "📅 今週のスケジュールをお知らせします"
+    }
+  ],
+  "reminder_minutes_before": [
+    15,
+    60
+  ],
+  "gantt_chart": {
+    "width": 12,
+    "height": 6,
+    "colors": [
+      "#4FC3F7",
+      "#81C784",
+      "#FFB74D",
+      "#E57373",
+      "#BA68C8",
+      "#4DD0E1",
+      "#AED581",
+      "#FF8A65"
+    ]
+  },
+  "recurring_events": [
+    {
+      "title": "(月)ブーストゲット！",
+      "type": "weekly",
+      "days_of_week": [
+        0
+      ],
+      "description": "0=月曜〜6=日曜。自動生成されます",
+      "assignee": "System"
+    },
+    {
+      "title": "(火)ごちそうゲット！",
+      "type": "weekly",
+      "days_of_week": [
+        1
+      ],
+      "description": "0=月曜〜6=日曜。自動生成されます",
+      "assignee": "System"
+    },
+    {
+      "title": "(水)経験値ゲット！",
+      "type": "weekly",
+      "days_of_week": [
+        2
+      ],
+      "description": "0=月曜〜6=日曜。自動生成されます",
+      "assignee": "System"
+    },
+    {
+      "title": "(木)コインゲット！",
+      "type": "weekly",
+      "days_of_week": [
+        3
+      ],
+      "description": "0=月曜〜6=日曜。自動生成されます",
+      "assignee": "System"
+    },
+    {
+      "title": "(金)レッツ！　フィッシング！",
+      "type": "weekly",
+      "days_of_week": [
+        4
+      ],
+      "description": "0=月曜〜6=日曜。自動生成されます",
+      "assignee": "System"
+    },
+    {
+      "title": "(土)ゴールドゲット！",
+      "type": "weekly",
+      "days_of_week": [
+        5
+      ],
+      "description": "0=月曜〜6=日曜。自動生成されます",
+      "assignee": "System"
+    },
+    {
+      "title": "(日)経験値ゲット！",
+      "type": "weekly",
+      "days_of_week": [
+        6
+      ],
+      "description": "0=月曜〜6=日曜。自動生成されます",
+      "assignee": "System"
+    },
+    {
+      "title": "ランダムボスチャレンジ",
+      "type": "even_days",
+      "description": "日付が偶数の日に自動生成されます",
+      "assignee": "System"
+    }
+  ]
+}

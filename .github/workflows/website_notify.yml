@@ -1,0 +1,44 @@
+name: 🌐 公式サイト新着記事通知
+
+on:
+  schedule:
+    # 1時間ごとに実行（JST の毎時0分）
+    - cron: '0 * * * *'
+  # 手動実行も可能
+  workflow_dispatch:
+
+jobs:
+  check-website:
+    runs-on: ubuntu-latest
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Python をセットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 依存パッケージをインストール
+        run: |
+          pip install -r requirements.txt
+
+      - name: サービスアカウントキーを作成
+        run: |
+          echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}' > service_account.json
+
+      - name: 既知記事データのキャッシュを復元
+        uses: actions/cache@v4
+        with:
+          path: data/known_articles.json
+          key: known-articles-${{ github.run_id }}
+          restore-keys: |
+            known-articles-
+
+      - name: 公式サイトチェック＆通知を実行
+        env:
+          DISCORD_WEBSITE_WEBHOOK_URL: ${{ secrets.DISCORD_WEBSITE_WEBHOOK_URL }}
+          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
+          GOOGLE_SERVICE_ACCOUNT_FILE: service_account.json
+        run: |
+          python src/website_notify_action.py
