@@ -171,7 +171,6 @@ def main():
     """メイン処理"""
     webhook_url = os.getenv("DISCORD_TWITTER_WEBHOOK_URL")
     username = os.getenv("TWITTER_USERNAME")
-    rsshub_base = os.getenv("RSSHUB_BASE_URL")  # オプション：セルフホスト時に指定
 
     if not webhook_url:
         logger.error("❌ DISCORD_TWITTER_WEBHOOK_URL が設定されていません")
@@ -187,14 +186,14 @@ def main():
     known_tweet_ids = known_data.get("tweet_ids", [])
     is_first_run = len(known_tweet_ids) == 0
 
-    # 2. RSSHub 経由でツイートを取得
-    logger.info(f"🐦 Twitter RSSフィードを取得中... (@{username})")
-    checker = TwitterChecker(username, rsshub_base)
+    # 2. Syndication API 経由でツイートを取得
+    logger.info(f"🐦 Twitterフィードを取得中... (@{username})")
+    checker = TwitterChecker(username)
     current_tweets = checker.fetch_tweets()
 
     if not current_tweets:
         logger.warning("⚠️ ツイートを取得できませんでした")
-        logger.warning("  → RSSHub インスタンスの稼働状況を確認してください")
+        logger.warning("  → Twitterの仕様が変更されたか、ユーザーが非公開(もしくは存在しない)可能性があります")
         sys.exit(1)
 
     logger.info(f"📋 {len(current_tweets)} 件のツイートを取得しました")
