@@ -171,6 +171,7 @@ def main():
     """メイン処理"""
     webhook_url = os.getenv("DISCORD_TWITTER_WEBHOOK_URL")
     username = os.getenv("TWITTER_USERNAME")
+    rss_url = os.getenv("TWITTER_RSS_URL")  # RSS.app 等の外部 RSS URL
 
     if not webhook_url:
         logger.error("❌ DISCORD_TWITTER_WEBHOOK_URL が設定されていません")
@@ -186,14 +187,18 @@ def main():
     known_tweet_ids = known_data.get("tweet_ids", [])
     is_first_run = len(known_tweet_ids) == 0
 
-    # 2. Syndication API 経由でツイートを取得
-    logger.info(f"🐦 Twitterフィードを取得中... (@{username})")
-    checker = TwitterChecker(username)
+    # 2. ツイートを取得
+    logger.info(f"🐦 Twitter情報の取得を開始... (@{username})")
+    checker = TwitterChecker(username, rss_url)
     current_tweets = checker.fetch_tweets()
 
     if not current_tweets:
         logger.warning("⚠️ ツイートを取得できませんでした")
-        logger.warning("  → Twitterの仕様が変更されたか、ユーザーが非公開(もしくは存在しない)可能性があります")
+        if not rss_url:
+            logger.warning("  💡 安定した取得のために RSS.app 等の外部 RSS 生成サービスの利用を推奨します")
+            logger.warning("     (TWITTER_RSS_URL 環境変数を設定してください)")
+        else:
+            logger.warning("  → 設定された RSS URL からデータを取得できませんでした。URL が正しいか確認してください")
         sys.exit(1)
 
     logger.info(f"📋 {len(current_tweets)} 件のツイートを取得しました")

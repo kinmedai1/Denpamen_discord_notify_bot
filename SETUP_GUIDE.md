@@ -460,7 +460,15 @@ GitHub Actions からDiscordやGoogle Sheetsにアクセスするために、機
 3. **Secret** に 監視対象のTwitterユーザー名（@なし）を入力（例: `denpaningen`）
 4. **「Add secret」** をクリック
 
-#### Secret ⑨: DISCORD_YOUTUBE_WEBHOOK_URL（オプション）
+#### Secret ⑨: TWITTER_RSS_URL（オプション・推奨）
+
+1. **「New repository secret」** をクリック
+2. **Name** に `TWITTER_RSS_URL` と入力
+3. **Secret** に 外部サービス（RSS.app等）で生成した RSS フィードの URL を貼り付け
+   - ※詳細は [11.2 RSS URL の取得方法](#112-rss-url-の取得方法) を参照
+4. **「Add secret」** をクリック
+
+#### Secret ⑩: DISCORD_YOUTUBE_WEBHOOK_URL（オプション）
 
 1. **「New repository secret」** をクリック
 2. **Name** に `DISCORD_YOUTUBE_WEBHOOK_URL` と入力
@@ -606,29 +614,46 @@ Twitter公式の Syndication API を利用しており、Twitter APIキーは不
 2. 作成したチャンネルの **設定** → **連携サービス** → **ウェブフックを作成**
 3. **「ウェブフックURLをコピー」** しておく
 
-### 11.2 GitHub Secrets の設定
+### 11.2 RSS URL の取得方法
 
-手順7.4と同じ方法で、以下の2つのシークレットを追加してください：
+Twitter API の制限により、直接の取得は不安定なため、以下の外部サービス（無料枠あり）を利用して RSS フィードを生成することを推奨します。
+
+#### RSS.app を利用する場合
+1. [RSS.app](https://rss.app/) にアクセスしてアカウント作成。
+2. 「Tools」→「Twitter RSS Generator」を選択。
+3. `@denpaningen` のプロフィールURL（`https://x.com/denpaningen`）を入力して生成。
+4. 生成された **RSS Feed URL** をコピーし、GitHub Secrets の `TWITTER_RSS_URL` に設定。
+
+#### Readybot.io を利用する場合
+1. [Readybot.io](https://readybot.io/) にアクセス。
+2. Twitter アカウントを登録し、出力設定から RSS フィードの URL を取得（詳細はサイトのガイドを参照）。
+3. 取得した URL を `TWITTER_RSS_URL` に設定。
+
+### 11.3 GitHub Secrets の設定
+
+手順7.4と同じ方法で、以下のシークレットを追加してください：
 
 | Secret名 | 値 |
 |-----------|----|
 | `DISCORD_TWITTER_WEBHOOK_URL` | 手順11.1でコピーしたWebhook URL |
 | `TWITTER_USERNAME` | `denpaningen`（@なし） |
+| `TWITTER_RSS_URL` | 手順11.2で取得した RSS URL |
 
-### 11.3 動作の仕組み
+### 11.4 動作の仕組み
 
-- **定期実行**: 1時間ごとにSyndication API経由でTwitterの投稿をチェックします（GitHub Actions `twitter_notify.yml`）
+- **定期実行**: 1時間ごとに外部 RSS フィードをチェックします（GitHub Actions `twitter_notify.yml`）
 - **新着通知**: 新しいツイートが検出されると、指定したチャンネルに通知が届きます
 - **初回実行時**: 初回実行時は、全ての既存ツイートを「既知」として登録するため、通知は送信されません（大量通知を防ぐため）
 
-### 11.4 手動テスト
+### 11.5 手動テスト
 
 1. GitHub リポジトリの **Actions** タブを開く
 2. 左側の **「🐦 Twitter新着ツイート通知」** を選択
 3. **「Run workflow」** → **「Run workflow」** をクリック
 4. `#電波人間Twitter通知` チャンネルに通知が届くことを確認
 
-> 💡 **備考:** この機能はTwitterが公式に提供している埋め込み用のAPIを利用していますが、将来的にTwitter側の仕様変更により動作しなくなる可能性があります。
+> 💡 **備考:** 外部サービスを利用することで、Twitter の仕様変更や IP 制限（429エラー）を回避して安定して取得できます。
+
 
 ---
 
