@@ -48,14 +48,33 @@ class TwitterChecker:
             - images: 画像URLのリスト
             - author: アカウント表示名
         """
+        import requests
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+
         try:
-            feed = feedparser.parse(self.feed_url)
-        except Exception as e:
+            response = requests.get(self.feed_url, headers=headers, timeout=15)
+            response.raise_for_status()
+            feed_content = response.text
+        except requests.exceptions.RequestException as e:
             logger.error(f"RSSフィードの取得に失敗しました: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"ステータスコード: {e.response.status_code}")
+                logger.error(f"レスポンス内容 (先頭500文字): {e.response.text[:500]}")
+            return []
+
+        try:
+            feed = feedparser.parse(feed_content)
+        except Exception as e:
+            logger.error(f"RSSフィードのパースに失敗しました: {e}")
+            logger.error(f"コンテンツ内容 (先頭500文字): {feed_content[:500]}")
             return []
 
         if feed.bozo and not feed.entries:
-            logger.error(f"RSSフィードのパースに失敗しました: {feed.bozo_exception}")
+            logger.error(f"RSSフィードが不正な形式です: {feed.bozo_exception}")
+            logger.error(f"コンテンツ内容 (先頭500文字): {feed_content[:500]}")
             return []
 
         tweets = []
