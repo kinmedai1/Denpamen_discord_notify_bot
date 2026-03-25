@@ -8,13 +8,15 @@ import sys
 import json
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from logging.handlers import TimedRotatingFileHandler
 
 # プロジェクトルートをパスに追加
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.utils.twitter_checker import TwitterChecker
+from src.utils.event_date_parser import extract_event_title, extract_event_end_date
+from src.utils.sheets_manager import SheetsManager
 
 # ロギング設定
 logging.basicConfig(
@@ -123,6 +125,60 @@ def build_notification_embed(tweet: dict) -> dict:
     return embed
 
 
+def auto_register_event(tweet: dict, sheets_manager: SheetsManager, existing_titles: set) -> dict | None:
+    """
+    ツイートからイベント情報を抽出し、Google Sheetsにスケジュールを登録する。
+
+    Args:
+        tweet: ツイート情報の辞書
+        sheets_manager: Google Sheets マネージャー
+        existing_titles: 既に登録済みのスケジュールタイトルのセット
+
+    Returns:
+        登録されたスケジュール辞書。登録しなかった場合は None。
+    """
+    text = tweet.get("text", "")
+    url = tweet.get("url", "")
+
+    # 1. 「◯◯開催」パターンからタイトル抽出
+    title = extract_event_title(text)
+    if not title:
+        logger.debug(f"「開催」パターンが見つかりません: {text[:50]}...")
+        return None
+
+    # 2. 重複チェック（同名タイトルが既に存在するか）
+    if title in existing_titles:
+        logger.info(f"⏭️ スケジュール「{title}」は既に登録済みのため、スキップします")
+        return None
+
+    # 3. 終了日時を抽出
+    now = datetime.utcnow() + timedelta(hours=9)  # JST
+    end_date = extract_event_end_date(text, reference_date=now)
+    if not end_date:
+        logger.debug(f"終了日時が抽出できません: {text[:50]}...")
+        return None
+
+    # 4. Google Sheetsにスケジュール登録
+    start_date_str = now.strftime("%Y-%m-%d %H:%M")
+    end_date_str = end_date.strftime("%Y-%m-%d %H:%M") if end_date.hour or end_date.minute else end_date.strftime("%Y-%m-%d")
+
+    try:
+        schedule = sheets_manager.add_schedule(
+            title=title,
+            start_date=start_date_str,
+            end_date=end_date_str,
+            description=url,
+            assignee="Twitter自動登録",
+        )
+        logger.info(f"📅 イベントを自動登録しました: 「{title}」 ({start_date_str} 〜 {end_date_str})")
+        # 登録した名前をセットに追加（同一バッチ内の重複防止）
+        existing_titles.add(title)
+        return schedule
+    except Exception as e:
+        logger.error(f"❌ イベント自動登録に失敗しました: {e}")
+        return None
+
+
 def build_summary_embed(new_tweets: list[dict]) -> dict:
     """
     複数の新着ツイートのサマリー Embed を作成する。
@@ -165,6 +221,37 @@ def send_webhook(webhook_url: str, embeds: list[dict]):
     else:
         logger.error(f"❌ Discord 通知の送信に失敗しました: {response.status_code} {response.text}")
         sys.exit(1)
+
+
+def _init_sheets_manager():
+    """
+    Google Sheets マネージャーを初期化する。
+    環境変数が設定されていない場合は None を返す。
+    """
+    sheets_id = os.getenv("GOOGLE_SHEETS_ID")
+    service_account_file = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "service_account.json")
+
+    if not sheets_id:
+        logger.warning("⚠️ GOOGLE_SHEETS_ID が未設定のため、イベント自動登録は無効です")
+        return None
+
+    try:
+        return SheetsManager(sheets_id, service_account_file)
+    except Exception as e:
+        logger.error(f"❌ Google Sheets の初期化に失敗しました: {e}")
+        return None
+
+
+def _get_existing_schedule_titles(sheets_manager: SheetsManager) -> set:
+    """
+    既存スケジュールのタイトル一覧をセットで取得する。
+    """
+    try:
+        all_schedules = sheets_manager.get_all_schedules()
+        return {s.get("title", "") for s in all_schedules if s.get("title")}
+    except Exception as e:
+        logger.error(f"❌ 既存スケジュールの取得に失敗しました: {e}")
+        return set()
 
 
 def main():
@@ -220,11 +307,20 @@ def main():
     if is_first_run:
         logger.info(f"🔰 初回実行: 全 {len(new_tweets)} 件のツイートを古い順に通知します")
 
-    # 6. Discord 通知を送信
+    # 5.5 Google Sheetsマネージャーの初期化（イベント自動登録用）
+    sheets_manager = _init_sheets_manager()
+    existing_titles = set()
+    if sheets_manager:
+        logger.info("📊 既存スケジュールを確認中...")
+        existing_titles = _get_existing_schedule_titles(sheets_manager)
+        logger.info(f"📋 既存スケジュールのタイトル: {len(existing_titles)} 件")
+
+    # 6. Discord 通知を送信 & イベント自動登録
     logger.info("📤 Discord 通知を送信中...")
 
     # Discord Webhookは1リクエストあたり最大10 Embedsまで
     max_embeds_per_request = 10
+    registered_events = []  # 自動登録されたイベントのリスト
 
     if len(new_tweets) > 1:
         # サマリーを最初に送信
@@ -232,14 +328,34 @@ def main():
         send_webhook(webhook_url, [summary_embed])
         time.sleep(1)  # レート制限対策
 
-    # ツイートを個別に通知（バッチ処理）
+    # ツイートを個別に通知（バッチ処理）& イベント自動登録
     for i in range(0, len(new_tweets), max_embeds_per_request):
         if i > 0:
             logger.info(f"  ⏳ 次の通知まで2秒待機...")
             time.sleep(2)  # レート制限対策
 
         batch = new_tweets[i:i + max_embeds_per_request]
-        embeds = [build_notification_embed(tweet) for tweet in batch]
+        embeds = []
+        for tweet in batch:
+            embed = build_notification_embed(tweet)
+
+            # イベント自動登録を試行
+            if sheets_manager:
+                schedule = auto_register_event(tweet, sheets_manager, existing_titles)
+                if schedule:
+                    registered_events.append(schedule)
+                    # Embedに自動登録情報を追加
+                    embed["fields"].append({
+                        "name": "📅 イベント自動登録",
+                        "value": (
+                            f"✅ **{schedule['title']}** をスケジュールに登録しました\n"
+                            f"期間: {schedule['start_date']} 〜 {schedule['end_date']}"
+                        ),
+                        "inline": False,
+                    })
+
+            embeds.append(embed)
+
         send_webhook(webhook_url, embeds)
 
     # 7. 既知ツイートリストを更新
@@ -247,6 +363,8 @@ def main():
     save_known_tweets(known_data)
 
     logger.info(f"🎉 処理完了: 新着 {len(new_tweets)} 件を通知しました")
+    if registered_events:
+        logger.info(f"📅 イベント自動登録: {len(registered_events)} 件を登録しました")
 
 
 if __name__ == "__main__":
