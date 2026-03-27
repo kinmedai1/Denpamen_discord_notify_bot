@@ -1,6 +1,12 @@
 """
-ツイート本文からイベント情報（タイトル・終了日時）を抽出するモジュール。
-「◯◯開催」パターンと日付パターンを正規表現で検出する。
+ツイート本文からイベント情報（タイトル・開始日時・終了日時）を抽出するモジュール。
+複数のツイートパターンに対応する。
+
+対応パターン:
+  - ◯◯開催 (直接結合パターン)
+  - 「◯◯」...開催/オープン (カギ括弧パターン)
+  - 開催中の ◯◯ は (インラインパターン)
+  - Ver.X.X.Xの配信 (バージョンアップデートパターン)
 """
 
 import re
@@ -10,14 +16,44 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# 「◯◯開催」パターン（「開催」の前までをタイトルとして抽出）
-# 「開催」の直後に「！」「!」「中」「 」「\n」等が続くケースに対応
-EVENT_TITLE_PATTERN = re.compile(
-    r'([^\s、。！!？?\n「」『』【】()（）]+?)開催'
+# ==============================================================================
+# タイトル抽出パターン
+# ==============================================================================
+
+# パターン1: ◯◯開催 (直接結合)
+# 例: "電波人間コロシアム開催！", "つりチャレンジ！開催中"
+# ！!を含むタイトルに対応、最低2文字以上
+PATTERN_DIRECT_KAISAI = re.compile(
+    r'([^\s、。？?\n「」『』【】()（）！!]{2,}[！!]?)開催'
 )
+
+# パターン2: 「◯◯」...開催/オープン (括弧パターン)
+# 例: 「幻帝のどうくつ」が開催中, 「電波人間コロシアム」がオープン
+PATTERN_BRACKET_EVENT = re.compile(
+    r'「([^」]+)」[^\n]*?(?:開催|オープン)'
+)
+
+# パターン3: 開催中の ◯◯ は/まで (インラインパターン)
+# 例: "開催中の ハイスコアチャレンジ! は明日11日まで"
+PATTERN_INLINE_EVENT = re.compile(
+    r'開催中の\s*(.+?)\s*(?:は|まで)'
+)
+
+# パターン4: Ver.X.X.Xの配信 (バージョンアップデートパターン)
+# 例: "Ver.8.0.11の配信を予定"
+PATTERN_VERSION = re.compile(
+    r'(Ver\.[\d.]+)\s*の配信'
+)
+
+# ==============================================================================
+# 日付抽出パターン
+# ==============================================================================
 
 # 終了を示すキーワード
 END_KEYWORDS = re.compile(r'(まで|〜|～|終了|期限|締切|〆切)')
+
+# 開始を示すキーワード
+START_KEYWORDS = re.compile(r'(から|より)')
 
 # 日付パターン: YYYY年MM月DD日 or YYYY/MM/DD or YYYY-MM-DD
 DATE_PATTERN_FULL = re.compile(
@@ -29,52 +65,131 @@ DATE_PATTERN_SHORT = re.compile(
     r'(?<!\d)(\d{1,2})[月/](\d{1,2})日?'
 )
 
+# 日付パターン: DD日（月なし、「明日11日」等）
+# 前後の文脈から月を推定する
+DATE_PATTERN_DAY_ONLY = re.compile(
+    r'(?:明日|明後日|あす|あさって)\s*(\d{1,2})日'
+)
+
 # 時刻パターン: HH:MM or HH時MM分 or HH時
 TIME_PATTERN = re.compile(
     r'(\d{1,2})[:時](\d{2})?分?'
 )
 
+# 「ごろ」パターン（おおよその時刻）
+GORO_PATTERN = re.compile(
+    r'(\d{1,2})時ごろ'
+)
+
+# 半角→全角 変換マップ（タイトル正規化用）
+HALF_TO_FULL = str.maketrans({
+    '!': '！',
+    '?': '？',
+})
+
+
+# ==============================================================================
+# タイトル抽出
+# ==============================================================================
+
+def normalize_title(title: str) -> str:
+    """
+    タイトルの正規化処理。
+    半角の！?を全角に変換し、前後の空白を除去する。
+
+    Args:
+        title: 正規化前のタイトル
+
+    Returns:
+        正規化後のタイトル
+    """
+    title = title.strip()
+    title = title.translate(HALF_TO_FULL)
+    return title
+
 
 def extract_event_title(text: str) -> Optional[str]:
     """
-    ツイート本文から「◯◯開催」パターンを検索し、◯◯部分を返す。
+    ツイート本文からイベントタイトルを抽出する。
+    複数のパターンを優先順位付きで試行し、最初にマッチしたものを返す。
+
+    優先順位:
+      1. ◯◯開催 (直接結合パターン)
+      2. 「◯◯」...開催/オープン (カギ括弧パターン)
+      3. 開催中の ◯◯ は (インラインパターン)
+      4. Ver.X.X.Xの配信 (バージョンアップデートパターン)
 
     Args:
         text: ツイート本文
 
     Returns:
-        イベントタイトル。パターンが見つからない場合は None。
+        正規化されたイベントタイトル。パターンが見つからない場合は None。
     """
     if not text:
         return None
 
-    match = EVENT_TITLE_PATTERN.search(text)
+    # パターン1: ◯◯開催 (直接結合)
+    match = PATTERN_DIRECT_KAISAI.search(text)
     if match:
-        title = match.group(1).strip()
-        # タイトルが空でないかチェック
+        title = normalize_title(match.group(1))
         if title:
-            logger.info(f"イベントタイトルを抽出: 「{title}」")
+            logger.info(f"イベントタイトルを抽出（直接パターン）: 「{title}」")
+            return title
+
+    # パターン2: 「◯◯」...開催/オープン (括弧パターン)
+    match = PATTERN_BRACKET_EVENT.search(text)
+    if match:
+        title = normalize_title(match.group(1))
+        if title:
+            logger.info(f"イベントタイトルを抽出（括弧パターン）: 「{title}」")
+            return title
+
+    # パターン3: 開催中の ◯◯ は/まで (インラインパターン)
+    match = PATTERN_INLINE_EVENT.search(text)
+    if match:
+        title = normalize_title(match.group(1))
+        if title:
+            logger.info(f"イベントタイトルを抽出（インラインパターン）: 「{title}」")
+            return title
+
+    # パターン4: Ver.X.X.Xの配信 (バージョンアップデートパターン)
+    match = PATTERN_VERSION.search(text)
+    if match:
+        title = normalize_title(match.group(1))
+        if title:
+            logger.info(f"イベントタイトルを抽出（バージョンパターン）: 「{title}」")
             return title
 
     return None
 
 
-def extract_event_end_date(
+# ==============================================================================
+# 日付抽出
+# ==============================================================================
+
+def extract_event_dates(
     text: str,
     reference_date: Optional[datetime] = None,
-) -> Optional[datetime]:
+) -> tuple[Optional[datetime], Optional[datetime]]:
     """
-    ツイート本文からイベント終了日時を抽出する。
+    ツイート本文からイベントの開始日時・終了日時を抽出する。
+
+    ルール:
+      - 「から」「より」の近くにある日付を開始日、「まで」「終了」等の近くにある日付を終了日とする
+      - 開始日のみの場合は、最も後の日付を終了日として補完
+      - 終了日のみの場合は、reference_date を開始日とする
+      - 「ごろ」がある場合は ±1時間のウィンドウを作成
+      - 日付情報が一切ない場合は (None, None) を返す
 
     Args:
         text: ツイート本文
         reference_date: 基準日時（年の補完・過去日判定に使用）。省略時は現在時刻（JST）。
 
     Returns:
-        抽出された終了日時の datetime。見つからない or 過去の場合は None。
+        (start_date, end_date) のタプル。日付が見つからない場合は (None, None)。
     """
     if not text:
-        return None
+        return None, None
 
     if reference_date is None:
         reference_date = datetime.utcnow() + timedelta(hours=9)
@@ -82,14 +197,74 @@ def extract_event_end_date(
     # 全ての日付を抽出
     dates_found = _extract_all_dates(text, reference_date)
 
+    # 日付が見つからない場合、「ごろ」パターンを単独チェック
     if not dates_found:
-        return None
+        return None, None
 
-    # 終了キーワードの近くにある日付を優先
-    end_date = _find_end_date(text, dates_found, reference_date)
+    # 「ごろ」パターンのチェック（日付に「ごろ」が付随しているか）
+    goro_result = _check_goro_pattern(text, dates_found, reference_date)
+    if goro_result:
+        return goro_result
+
+    # 開始・終了キーワードの位置を検出
+    start_date = _find_date_near_keyword(
+        text, dates_found, START_KEYWORDS, max_distance=30
+    )
+    end_date = _find_date_near_keyword(
+        text, dates_found, END_KEYWORDS, max_distance=50
+    )
+
+    # 結果の組み立て
+    if start_date and end_date:
+        # 両方見つかった場合
+        logger.info(f"開始日・終了日を抽出: {start_date} 〜 {end_date}")
+        return start_date, end_date
+    elif end_date:
+        # 終了日のみ → 開始日は現在時刻
+        logger.info(f"終了日のみ抽出: 〜{end_date}（開始日=現在時刻）")
+        return reference_date.replace(second=0, microsecond=0), end_date
+    elif start_date:
+        # 開始日のみ → 最も後の日付を終了日とする
+        dates_found.sort(key=lambda x: x["date"])
+        latest = dates_found[-1]["date"]
+        if latest > start_date:
+            logger.info(f"開始日のみ抽出: {start_date}〜{latest}")
+            return start_date, latest
+        else:
+            # 同一日付しかない場合
+            logger.info(f"開始日のみ抽出（同一日付）: {start_date}")
+            return start_date, start_date
+    else:
+        # キーワードなし → 日付がある場合は最も後の日付を終了日
+        if dates_found:
+            dates_found.sort(key=lambda x: x["date"])
+            latest = dates_found[-1]["date"]
+            logger.info(f"キーワードなし（最終日付を終了日に）: 〜{latest}")
+            return reference_date.replace(second=0, microsecond=0), latest
+        return None, None
+
+
+def extract_event_end_date(
+    text: str,
+    reference_date: Optional[datetime] = None,
+) -> Optional[datetime]:
+    """
+    後方互換性のためのラッパー。終了日時のみを返す。
+
+    Args:
+        text: ツイート本文
+        reference_date: 基準日時
+
+    Returns:
+        抽出された終了日時の datetime。見つからない場合は None。
+    """
+    _, end_date = extract_event_dates(text, reference_date)
 
     if end_date is None:
         return None
+
+    if reference_date is None:
+        reference_date = datetime.utcnow() + timedelta(hours=9)
 
     # 過去日チェック（日付のみの場合はその日の終わりまで有効）
     end_check = end_date
@@ -100,9 +275,12 @@ def extract_event_end_date(
         logger.info(f"抽出された終了日 {end_date} は過去のため、スキップします")
         return None
 
-    logger.info(f"イベント終了日を抽出: {end_date}")
     return end_date
 
+
+# ==============================================================================
+# 内部ヘルパー関数
+# ==============================================================================
 
 def _extract_all_dates(text: str, reference_date: datetime) -> list[dict]:
     """
@@ -164,6 +342,37 @@ def _extract_all_dates(text: str, reference_date: datetime) -> list[dict]:
         except ValueError:
             continue
 
+    # DD日（月なし）パターン: 「明日11日」「明後日5日」等
+    for match in DATE_PATTERN_DAY_ONLY.finditer(text):
+        try:
+            day = int(match.group(1))
+            if not (1 <= day <= 31):
+                continue
+
+            # 月は基準日の月を使用
+            month = reference_date.month
+            year = reference_date.year
+
+            # 日が基準日より前の場合は翌月
+            if day < reference_date.day:
+                month += 1
+                if month > 12:
+                    month = 1
+                    year += 1
+
+            dt = datetime(year, month, day)
+
+            # 日付の直後に時刻があるかチェック
+            dt = _try_attach_time(text, match.end(), dt)
+
+            results.append({
+                "date": dt,
+                "pos": match.start(),
+                "text": match.group(0),
+            })
+        except ValueError:
+            continue
+
     return results
 
 
@@ -183,9 +392,19 @@ def _is_part_of_full_date(text: str, pos: int) -> bool:
 
 
 def _try_attach_time(text: str, date_end_pos: int, dt: datetime) -> datetime:
-    """日付の直後にある時刻を検出し、日付に付与する"""
-    # 日付の後ろ10文字以内に時刻があるかチェック
-    remaining = text[date_end_pos:date_end_pos + 15]
+    """
+    日付の直後にある時刻を検出し、日付に付与する。
+    曜日を示す括弧 (月)、(火) 等をスキップする。
+    """
+    # 日付の後ろの文字列を取得（十分な範囲）
+    remaining = text[date_end_pos:date_end_pos + 30]
+
+    # 曜日括弧をスキップ: (月), (火), (水), (木), (金), (土), (日)
+    remaining = re.sub(r'^\s*[（(][月火水木金土日][）)]', '', remaining)
+
+    # 「の」「 」などの区切り文字をスキップ
+    remaining = re.sub(r'^[\sの]+', '', remaining)
+
     time_match = TIME_PATTERN.search(remaining)
 
     if time_match and time_match.start() <= 5:
@@ -197,35 +416,120 @@ def _try_attach_time(text: str, date_end_pos: int, dt: datetime) -> datetime:
     return dt
 
 
-def _find_end_date(
+def _find_date_near_keyword(
+    text: str,
+    dates_found: list[dict],
+    keyword_pattern: re.Pattern,
+    max_distance: int = 50,
+) -> Optional[datetime]:
+    """
+    指定されたキーワードパターンの直前にある日付を返す。
+    「から」「まで」等のキーワードは、その直前の日付を指すため、
+    キーワードより前にある日付を優先する。
+
+    Args:
+        text: テキスト
+        dates_found: 抽出済みの日付リスト
+        keyword_pattern: キーワードの正規表現パターン
+        max_distance: キーワードと日付の最大距離（文字数）
+
+    Returns:
+        最も近い日付の datetime。見つからない場合は None。
+    """
+    keyword_positions = [m.start() for m in keyword_pattern.finditer(text)]
+
+    if not keyword_positions:
+        return None
+
+    best_date = None
+    best_distance = float('inf')
+
+    for kw_pos in keyword_positions:
+        for date_info in dates_found:
+            date_pos = date_info["pos"]
+            # キーワードの位置との距離
+            distance = abs(date_pos - kw_pos)
+
+            if distance > max_distance:
+                continue
+
+            # キーワードより前にある日付を優先（重み付け）
+            # 「から」の直前の日付、「まで」の直前の日付を正しくマッチさせる
+            if date_pos <= kw_pos:
+                # 日付がキーワードの前にある → 優先度高（距離をそのまま使用）
+                weighted_distance = distance
+            else:
+                # 日付がキーワードの後にある → 優先度低（距離にペナルティ）
+                weighted_distance = distance + max_distance
+
+            if weighted_distance < best_distance:
+                best_distance = weighted_distance
+                best_date = date_info["date"]
+
+    return best_date
+
+
+def _check_goro_pattern(
     text: str,
     dates_found: list[dict],
     reference_date: datetime,
-) -> Optional[datetime]:
+) -> Optional[tuple[datetime, datetime]]:
     """
-    終了キーワードの近くにある日付、または複数日付のうち最も後の日付を終了日とする。
+    「ごろ」パターンがある場合、±1時間のウィンドウを作成する。
+    例: "15時ごろ" → (date 14:00, date 16:00)
+
+    Args:
+        text: テキスト
+        dates_found: 抽出済みの日付リスト
+        reference_date: 基準日時
+
+    Returns:
+        (start_date, end_date) のタプル。パターンがない場合は None。
     """
-    if not dates_found:
+    goro_match = GORO_PATTERN.search(text)
+    if not goro_match:
         return None
 
-    # 終了キーワードの位置を検出
-    end_keyword_positions = [m.start() for m in END_KEYWORDS.finditer(text)]
+    goro_hour = int(goro_match.group(1))
+    if not (0 <= goro_hour <= 23):
+        return None
 
-    if end_keyword_positions:
-        # 終了キーワードに最も近い日付を探す（前後50文字以内）
-        best_date = None
-        best_distance = float('inf')
+    goro_pos = goro_match.start()
 
-        for kw_pos in end_keyword_positions:
-            for date_info in dates_found:
-                distance = abs(date_info["pos"] - kw_pos)
-                if distance < best_distance and distance <= 50:
-                    best_distance = distance
-                    best_date = date_info["date"]
+    # 「ごろ」に最も近い日付を探す
+    best_date = None
+    best_distance = float('inf')
 
-        if best_date:
-            return best_date
+    for date_info in dates_found:
+        distance = abs(date_info["pos"] - goro_pos)
+        if distance < best_distance and distance <= 80:
+            best_distance = distance
+            best_date = date_info["date"]
 
-    # 終了キーワードが見つからない場合、最も後の日付を返す
-    dates_found.sort(key=lambda x: x["date"])
-    return dates_found[-1]["date"]
+    if best_date is None:
+        return None
+
+    # 日付部分のみ使用（時刻は「ごろ」から取得）
+    base_date = best_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    start_dt = base_date.replace(hour=max(0, goro_hour - 1))
+    end_dt = base_date.replace(hour=min(23, goro_hour + 1))
+
+    logger.info(f"「ごろ」パターン検出: {goro_hour}時ごろ → {start_dt} 〜 {end_dt}")
+    return start_dt, end_dt
+
+
+def periods_overlap(
+    start1: datetime, end1: datetime,
+    start2: datetime, end2: datetime,
+) -> bool:
+    """
+    2つの期間が重なるかチェックする。
+
+    Args:
+        start1, end1: 期間1
+        start2, end2: 期間2
+
+    Returns:
+        期間が重なる場合 True
+    """
+    return start1 < end2 and start2 < end1

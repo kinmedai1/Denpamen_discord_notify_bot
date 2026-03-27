@@ -15,7 +15,7 @@ from logging.handlers import TimedRotatingFileHandler
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.utils.twitter_checker import TwitterChecker
-from src.utils.event_date_parser import extract_event_title, extract_event_end_date
+from src.utils.event_date_parser import extract_event_title, extract_event_dates, periods_overlap
 from src.utils.sheets_manager import SheetsManager
 
 # ロギング設定
@@ -125,14 +125,19 @@ def build_notification_embed(tweet: dict) -> dict:
     return embed
 
 
-def auto_register_event(tweet: dict, sheets_manager: SheetsManager, existing_titles: set) -> dict | None:
+def auto_register_event(tweet: dict, sheets_manager: SheetsManager, existing_schedules: list[dict]) -> dict | None:
     """
     ツイートからイベント情報を抽出し、Google Sheetsにスケジュールを登録する。
+
+    登録ルール:
+      - イベントタイトルが抽出できない場合はスキップ
+      - 開始日・終了日が共に抽出できない場合はスキップ
+      - 同名イベントで期間が重なる場合はスキップ（期間が被らなければ登録可能）
 
     Args:
         tweet: ツイート情報の辞書
         sheets_manager: Google Sheets マネージャー
-        existing_titles: 既に登録済みのスケジュールタイトルのセット
+        existing_schedules: 既に登録済みのスケジュールのリスト
 
     Returns:
         登録されたスケジュール辞書。登録しなかった場合は None。
@@ -140,26 +145,42 @@ def auto_register_event(tweet: dict, sheets_manager: SheetsManager, existing_tit
     text = tweet.get("text", "")
     url = tweet.get("url", "")
 
-    # 1. 「◯◯開催」パターンからタイトル抽出
+    # 1. イベントタイトルを抽出
     title = extract_event_title(text)
     if not title:
-        logger.debug(f"「開催」パターンが見つかりません: {text[:50]}...")
+        logger.debug(f"イベントタイトルが見つかりません: {text[:50]}...")
         return None
 
-    # 2. 重複チェック（同名タイトルが既に存在するか）
-    if title in existing_titles:
-        logger.info(f"⏭️ スケジュール「{title}」は既に登録済みのため、スキップします")
-        return None
-
-    # 3. 終了日時を抽出
+    # 2. 開始日・終了日を抽出
     now = datetime.utcnow() + timedelta(hours=9)  # JST
-    end_date = extract_event_end_date(text, reference_date=now)
-    if not end_date:
-        logger.debug(f"終了日時が抽出できません: {text[:50]}...")
+    start_date, end_date = extract_event_dates(text, reference_date=now)
+
+    if start_date is None and end_date is None:
+        logger.debug(f"日付情報が見つかりません: {text[:50]}...")
         return None
 
-    # 4. Google Sheetsにスケジュール登録
-    start_date_str = now.strftime("%Y-%m-%d %H:%M")
+    # 開始日がない場合は現在時刻を使用
+    if start_date is None:
+        start_date = now.replace(second=0, microsecond=0)
+    # 終了日がない場合は開始日と同じ
+    if end_date is None:
+        end_date = start_date
+
+    # 3. 過去日チェック
+    end_check = end_date
+    if end_date.hour == 0 and end_date.minute == 0:
+        end_check = end_date.replace(hour=23, minute=59, second=59)
+    if end_check < now:
+        logger.info(f"⏭️ イベント「{title}」の終了日 {end_date} は過去のため、スキップします")
+        return None
+
+    # 4. 重複チェック（同名イベントで期間が重なるかどうか）
+    if _is_duplicate_event(title, start_date, end_date, existing_schedules):
+        logger.info(f"⏭️ スケジュール「{title}」は期間が重なる同名イベントが存在するため、スキップします")
+        return None
+
+    # 5. Google Sheetsにスケジュール登録
+    start_date_str = start_date.strftime("%Y-%m-%d %H:%M")
     end_date_str = end_date.strftime("%Y-%m-%d %H:%M") if end_date.hour or end_date.minute else end_date.strftime("%Y-%m-%d")
 
     try:
@@ -171,12 +192,85 @@ def auto_register_event(tweet: dict, sheets_manager: SheetsManager, existing_tit
             assignee="Twitter自動登録",
         )
         logger.info(f"📅 イベントを自動登録しました: 「{title}」 ({start_date_str} 〜 {end_date_str})")
-        # 登録した名前をセットに追加（同一バッチ内の重複防止）
-        existing_titles.add(title)
+        # 登録したスケジュールを既存リストに追加（同一バッチ内の重複防止）
+        existing_schedules.append(schedule)
         return schedule
     except Exception as e:
         logger.error(f"❌ イベント自動登録に失敗しました: {e}")
         return None
+
+
+def _is_duplicate_event(
+    title: str,
+    start_date: datetime,
+    end_date: datetime,
+    existing_schedules: list[dict],
+) -> bool:
+    """
+    同名のイベントで期間が重なるものが存在するかチェックする。
+
+    Args:
+        title: チェック対象のイベントタイトル
+        start_date: チェック対象の開始日時
+        end_date: チェック対象の終了日時
+        existing_schedules: 既存のスケジュールリスト
+
+    Returns:
+        重複する場合 True
+    """
+    for schedule in existing_schedules:
+        existing_title = schedule.get("title", "")
+        if existing_title != title:
+            continue
+
+        # 同名イベントが見つかった → 期間の重複チェック
+        try:
+            existing_start_str = str(schedule.get("start_date", "")).strip()
+            existing_end_str = str(schedule.get("end_date", existing_start_str)).strip()
+
+            if not existing_start_str:
+                continue
+
+            # 開始日時のパース
+            existing_start = None
+            for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
+                try:
+                    existing_start = datetime.strptime(existing_start_str, fmt)
+                    break
+                except ValueError:
+                    pass
+
+            # 終了日時のパース
+            existing_end = None
+            for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
+                try:
+                    existing_end = datetime.strptime(existing_end_str, fmt)
+                    break
+                except ValueError:
+                    pass
+
+            if existing_start is None or existing_end is None:
+                # パースできない場合は安全のため重複とみなす
+                logger.warning(f"既存スケジュール「{title}」の日付パースに失敗: {existing_start_str} 〜 {existing_end_str}")
+                return True
+
+            # 終了日が日付のみの場合は23:59:59として扱う
+            if len(existing_end_str) == 10:
+                existing_end = existing_end.replace(hour=23, minute=59, second=59)
+
+            # 期間の重複チェック
+            if periods_overlap(start_date, end_date, existing_start, existing_end):
+                logger.debug(
+                    f"期間重複検出: 「{title}」"
+                    f" 新規={start_date}〜{end_date}"
+                    f" 既存={existing_start}〜{existing_end}"
+                )
+                return True
+        except Exception as e:
+            logger.warning(f"重複チェック中にエラー: {e}")
+            return True  # エラー時は安全のため重複とみなす
+
+    return False
 
 
 def build_summary_embed(new_tweets: list[dict]) -> dict:
@@ -242,16 +336,16 @@ def _init_sheets_manager():
         return None
 
 
-def _get_existing_schedule_titles(sheets_manager: SheetsManager) -> set:
+def _get_existing_schedules(sheets_manager: SheetsManager) -> list[dict]:
     """
-    既存スケジュールのタイトル一覧をセットで取得する。
+    既存スケジュールのリストを取得する。
+    期間重複チェックのために日付情報も含む。
     """
     try:
-        all_schedules = sheets_manager.get_all_schedules()
-        return {s.get("title", "") for s in all_schedules if s.get("title")}
+        return sheets_manager.get_all_schedules()
     except Exception as e:
         logger.error(f"❌ 既存スケジュールの取得に失敗しました: {e}")
-        return set()
+        return []
 
 
 def main():
@@ -309,11 +403,11 @@ def main():
 
     # 5.5 Google Sheetsマネージャーの初期化（イベント自動登録用）
     sheets_manager = _init_sheets_manager()
-    existing_titles = set()
+    existing_schedules = []
     if sheets_manager:
         logger.info("📊 既存スケジュールを確認中...")
-        existing_titles = _get_existing_schedule_titles(sheets_manager)
-        logger.info(f"📋 既存スケジュールのタイトル: {len(existing_titles)} 件")
+        existing_schedules = _get_existing_schedules(sheets_manager)
+        logger.info(f"📋 既存スケジュール: {len(existing_schedules)} 件")
 
     # 6. Discord 通知を送信 & イベント自動登録
     logger.info("📤 Discord 通知を送信中...")
@@ -341,7 +435,7 @@ def main():
 
             # イベント自動登録を試行
             if sheets_manager:
-                schedule = auto_register_event(tweet, sheets_manager, existing_titles)
+                schedule = auto_register_event(tweet, sheets_manager, existing_schedules)
                 if schedule:
                     registered_events.append(schedule)
                     # Embedに自動登録情報を追加
