@@ -101,7 +101,9 @@ class TwitterChecker:
                         break
 
         if not tweets_data:
-            logger.warning("ツイートデータが見つかりませんでした。APIのレスポンス形式を確認してください。")
+            import json
+            logger.warning(f"ツイートデータが見つかりませんでした。Response keys: {list(data.keys()) if isinstance(data, dict) else type(data)}")
+            logger.warning(f"Response: {json.dumps(data, ensure_ascii=False)[:3000]}")
             return []
 
         tweets = []
