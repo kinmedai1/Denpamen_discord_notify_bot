@@ -352,7 +352,8 @@ def main():
     """メイン処理"""
     webhook_url = os.getenv("DISCORD_TWITTER_WEBHOOK_URL")
     username = os.getenv("TWITTER_USERNAME")
-    rss_url = os.getenv("TWITTER_RSS_URL")  # RSS.app 等の外部 RSS URL
+    rapidapi_key = os.getenv("RAPIDAPI_KEY")
+    rapidapi_host = os.getenv("RAPIDAPI_HOST", "twitter154.p.rapidapi.com")
 
     if not webhook_url:
         logger.error("❌ DISCORD_TWITTER_WEBHOOK_URL が設定されていません")
@@ -360,6 +361,10 @@ def main():
 
     if not username:
         logger.error("❌ TWITTER_USERNAME が設定されていません")
+        sys.exit(1)
+
+    if not rapidapi_key:
+        logger.error("❌ RAPIDAPI_KEY が設定されていません。RapidAPIのキーを取得して設定してください。")
         sys.exit(1)
 
     # 1. 既知ツイートの読み込み
@@ -370,16 +375,12 @@ def main():
 
     # 2. ツイートを取得
     logger.info(f"🐦 Twitter情報の取得を開始... (@{username})")
-    checker = TwitterChecker(username, rss_url)
+    checker = TwitterChecker(username, rapidapi_key, rapidapi_host)
     current_tweets = checker.fetch_tweets()
 
     if not current_tweets:
         logger.warning("⚠️ ツイートを取得できませんでした")
-        if not rss_url:
-            logger.warning("  💡 安定した取得のために RSS.app 等の外部 RSS 生成サービスの利用を推奨します")
-            logger.warning("     (TWITTER_RSS_URL 環境変数を設定してください)")
-        else:
-            logger.warning("  → 設定された RSS URL からデータを取得できませんでした。URL が正しいか確認してください")
+        logger.warning("  → APIキーやホスト名が正しいか、RapidAPIの無料枠制限に達していないか確認してください")
         sys.exit(1)
 
     logger.info(f"📋 {len(current_tweets)} 件のツイートを取得しました")

@@ -1,8 +1,9 @@
 """
 Twitter（X）アカウントの新着ツイートチェックモジュール。
-外部の RSS フィードまたは Twitter Syndication API を利用してツイート情報を取得する。
+RapidAPI上のサードパーティAPIを利用してツイート情報を取得する。
 """
 
+import os
 import json
 import logging
 import re
@@ -10,31 +11,31 @@ from datetime import datetime
 from typing import Optional
 
 import requests
-import feedparser
 
 logger = logging.getLogger(__name__)
 
-# Syndication API のエンドポイント (フォールバック用)
-SYNDICATION_API_URL = "https://syndication.twitter.com/srv/timeline-profile/screen-name/{username}"
-
-
 class TwitterChecker:
-    """RSS フィードまたは Syndication API 経由で Twitter アカウントのツイートを取得するクラス"""
+    """RapidAPI 経由で Twitter アカウントのツイートを取得するクラス"""
 
-    def __init__(self, username: str, rss_url: Optional[str] = None):
+    def __init__(self, username: str, rapidapi_key: str, rapidapi_host: str):
         """
         Args:
             username: Twitterユーザー名（@なし）
-            rss_url: 外部サービスで生成された RSS フィードの URL (推奨)
+            rapidapi_key: RapidAPI の X-RapidAPI-Key
+            rapidapi_host: RapidAPI の X-RapidAPI-Host (例: twitter154.p.rapidapi.com)
         """
         self.username = username
-        self.rss_url = rss_url
-        self.syndication_url = SYNDICATION_API_URL.format(username=username)
+        self.rapidapi_key = rapidapi_key
+        self.rapidapi_host = rapidapi_host
+
+        # Twitter154 などのエンドポイント
+        # ホスト名によってURLを可変にする等の工夫も可能だが、
+        # 今回は代表的な Twitter154 等のフォーマットを前提とする
+        self.api_url = f"https://{self.rapidapi_host}/user/tweets"
 
     def fetch_tweets(self) -> list[dict]:
         """
-        ツイート一覧を取得する。RSS URL が指定されている場合は RSS を、
-        指定されていない場合は Syndication API を試行する。
+        ツイート一覧を取得する。RapidAPI を利用する。
 
         Returns:
             ツイート情報のリスト。各ツイートは以下のキーを持つ:
@@ -46,151 +47,114 @@ class TwitterChecker:
             - images: 画像URLのリスト
             - author: アカウント表示名
         """
-        if self.rss_url:
-            logger.info(f"外部 RSS フィードを利用して取得中: {self.rss_url}")
-            return self._fetch_from_rss(self.rss_url)
-        else:
-            logger.info("RSS URL が設定されていないため、Syndication API を利用します（制限される可能性があります）")
-            return self._fetch_from_syndication()
+        if not self.rapidapi_key or not self.rapidapi_host:
+            logger.error("RapidAPI のキーまたはホストが設定されていません。")
+            return []
 
-    def _fetch_from_rss(self, url: str) -> list[dict]:
-        """指定された RSS URL からツイートを取得する"""
+        logger.info(f"RapidAPI ({self.rapidapi_host}) を利用して @{self.username} のツイートを取得中...")
+        return self._fetch_from_rapidapi()
+
+    def _fetch_from_rapidapi(self) -> list[dict]:
+        """RapidAPI からユーザーのツイートを取得する"""
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "X-RapidAPI-Key": self.rapidapi_key,
+            "X-RapidAPI-Host": self.rapidapi_host
+        }
+        
+        querystring = {
+            "username": self.username,
+            "limit": "20",
+            "include_replies": "false",
+            "include_pinned": "false"
         }
 
         try:
-            response = requests.get(url, headers=headers, timeout=15)
+            response = requests.get(self.api_url, headers=headers, params=querystring, timeout=15)
             response.raise_for_status()
-            feed_content = response.text
+            data = response.json()
         except requests.exceptions.RequestException as e:
-            logger.error(f"RSS フィードの取得に失敗しました: {e}")
+            logger.error(f"RapidAPI からの取得に失敗しました: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response: {e.response.text}")
+            return []
+        except ValueError as e:
+            logger.error(f"RapidAPI のレスポンス解析に失敗しました: {e}")
             return []
 
-        try:
-            feed = feedparser.parse(feed_content)
-        except Exception as e:
-            logger.error(f"RSS フィードのパースに失敗しました: {e}")
+        # APIごとのレスポンス構造の差異を柔軟に吸収
+        tweets_data = []
+        if isinstance(data, list):
+            tweets_data = data
+        elif isinstance(data, dict):
+            # Twitter154 などは {"results": [...]} などの形で返すことがある
+            if "results" in data:
+                tweets_data = data["results"]
+            elif "data" in data and "tweets" in data["data"]:
+                tweets_data = data["data"]["tweets"]
+            elif "timeline" in data:
+                tweets_data = data["timeline"]
+            else:
+                # 辞書内のリスト要素を探す
+                for key, value in data.items():
+                    if isinstance(value, list) and len(value) > 0 and isinstance(value[0], dict):
+                        tweets_data = value
+                        break
+
+        if not tweets_data:
+            logger.warning("ツイートデータが見つかりませんでした。APIのレスポンス形式を確認してください。")
             return []
 
         tweets = []
-        for entry in feed.entries:
-            tweet_url = entry.get("link", "")
-            # ID は guid または link から取得
-            tweet_id = entry.get("id", tweet_url)
-            # 多くの RSS 生成サービスではリンクの末尾が ID になっている
-            if not tweet_id and tweet_url:
-                tweet_id = tweet_url.split("/")[-1]
-
-            if not tweet_id:
-                continue
-
-            # 本文 (summary または description)
-            raw_text = entry.get("summary", "") or entry.get("description", "")
-            clean_text = self._strip_html(raw_text)
-
-            # 画像URLの抽出 (HTML内部)
-            images = self._extract_images_from_html(raw_text)
-
-            # RSS.app 等の外部サービスは media_content や enclosures に画像を配置することがある
-            if not images and hasattr(entry, "media_content"):
-                for media in entry.media_content:
-                    url = media.get("url")
-                    if url and (media.get("medium") == "image" or not media.get("medium")):
-                        images.append(url)
-
-            if not images and hasattr(entry, "enclosures"):
-                for enc in entry.enclosures:
-                    href = enc.get("href")
-                    enc_type = enc.get("type", "")
-                    if href and (enc_type.startswith("image/") or href.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp'))):
-                        images.append(href)
-
-            # 日時
-            published = entry.get("published", "")
-            published_formatted = self._format_rss_date(published)
-
-            # アカウント名
-            author = entry.get("author", f"@{self.username}")
-
-            tweets.append({
-                "tweet_id": str(tweet_id),
-                "text": clean_text,
-                "url": tweet_url,
-                "published": published,
-                "published_formatted": published_formatted,
-                "images": images,
-                "author": author,
-            })
-
-        logger.info(f"RSS から {len(tweets)} 件のツイートを取得しました")
-        return tweets
-
-    def _fetch_from_syndication(self) -> list[dict]:
-        """Syndication API からツイートを取得する (フォールバック)"""
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Referer": "https://twitter.com/"
-        }
-
-        try:
-            response = requests.get(self.syndication_url, headers=headers, timeout=15)
-            response.raise_for_status()
-            html_content = response.text
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Syndication API からの取得に失敗しました: {e}")
-            return []
-
-        # __NEXT_DATA__ スクリプトタグ内の JSON を探す
-        match = re.search(r'<script id="__NEXT_DATA__" type="application/json">([^<]+)</script>', html_content)
-        if not match:
-            logger.error("HTML 内に __NEXT_DATA__ が見つかりませんでした。")
-            return []
-
-        try:
-            data = json.loads(match.group(1))
-            entries = data["props"]["pageProps"]["timeline"]["entries"]
-        except (KeyError, TypeError, json.JSONDecodeError) as e:
-            logger.error(f"JSON データの解析に失敗しました: {e}")
-            return []
-
-        tweets = []
-        for entry in entries:
-            if entry.get("type") != "tweet":
-                continue
-
+        for tweet_data in tweets_data:
             try:
-                tweet_data = entry["content"]["tweet"]
-                tweet_id = str(tweet_data["id_str"])
-                text = tweet_data.get("full_text", tweet_data.get("text", ""))
+                # ID
+                tweet_id = str(tweet_data.get("tweet_id", tweet_data.get("id", tweet_data.get("id_str", ""))))
+                if not tweet_id:
+                    continue
+
+                # テキスト
+                text = tweet_data.get("text", tweet_data.get("full_text", ""))
                 
+                # 画像
                 images = []
-                # メディア抽出
-                entities = tweet_data.get("extended_entities", tweet_data.get("entities", {}))
-                for media in entities.get("media", []):
-                    if media.get("type") == "photo" and "media_url_https" in media:
-                        images.append(media["media_url_https"])
+                # Twitter154: media_url リスト形式
+                if "media_url" in tweet_data and isinstance(tweet_data["media_url"], list):
+                    images = [img for img in tweet_data["media_url"] if isinstance(img, str)]
+                # entities.media 形式
+                elif "entities" in tweet_data and "media" in tweet_data["entities"]:
+                    for media in tweet_data["entities"]["media"]:
+                        if media.get("type") == "photo" and "media_url_https" in media:
+                            images.append(media["media_url_https"])
 
-                created_at = tweet_data.get("created_at", "")
-                published_formatted = self._format_syndication_date(created_at)
+                # 日時
+                created_at = tweet_data.get("creation_date", tweet_data.get("created_at", ""))
+                published_formatted = self._format_date(created_at)
 
+                # アカウント名
                 user_data = tweet_data.get("user", {})
                 author = user_data.get("name", f"@{self.username}")
                 screen_name = user_data.get("screen_name", self.username)
+                
+                # URL
+                tweet_url = tweet_data.get("expanded_url", f"https://x.com/{screen_name}/status/{tweet_id}")
+
+                # クリーンアップ
+                clean_text = self._strip_html(text)
 
                 tweets.append({
                     "tweet_id": tweet_id,
-                    "text": text,
-                    "url": f"https://x.com/{screen_name}/status/{tweet_id}",
+                    "text": clean_text,
+                    "url": tweet_url,
                     "published": created_at,
                     "published_formatted": published_formatted,
                     "images": images,
                     "author": author,
                 })
-            except Exception:
+            except Exception as e:
+                logger.debug(f"ツイートデータのパース中にエラー: {e}")
                 continue
 
-        logger.info(f"Syndication API から {len(tweets)} 件のツイートを取得しました")
+        logger.info(f"RapidAPI から {len(tweets)} 件のツイートを取得しました")
         return tweets
 
     def _strip_html(self, html_text: str) -> str:
@@ -203,28 +167,15 @@ class TwitterChecker:
             text = text.replace(entity, char)
         return re.sub(r"\n{3,}", "\n\n", text).strip()
 
-    def _extract_images_from_html(self, html_text: str) -> list[str]:
-        """HTML 内の <img> タグから画像 URL を抽出する"""
-        if not html_text: return []
-        return re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', html_text, re.IGNORECASE)
-
-    def _format_rss_date(self, published: str) -> str:
-        """RSS の日付文字列をフォーマットする"""
+    def _format_date(self, published: str) -> str:
+        """API の日付文字列をフォーマットする"""
         if not published: return ""
         try:
-            # feedparser のパースを利用
-            import email.utils
-            dt = email.utils.parsedate_to_datetime(published)
-            return dt.strftime("%Y/%m/%d %H:%M")
-        except Exception:
+            # 様々なフォーマットへの対応 (Mon Mar 30 08:00:00 +0000 2026)
+            if "+0000" in published:
+                dt = datetime.strptime(published.replace("+0000", "").strip(), "%a %b %d %H:%M:%S %Y")
+                return dt.strftime("%Y/%m/%d %H:%M")
             return published
-
-    def _format_syndication_date(self, published: str) -> str:
-        """Syndication API の日付文字列をフォーマットする"""
-        if not published: return ""
-        try:
-            dt = datetime.strptime(published, "%a %b %d %H:%M:%S %z %Y")
-            return dt.strftime("%Y/%m/%d %H:%M")
         except Exception:
             return published
 

@@ -1,9 +1,9 @@
 name: 🐦 Twitter新着ツイート通知
-
+#コメントアウトして一時停止中
 on:
-  # schedule:
-  #   # 1時間ごとに実行（JST の毎時0分）
-  #   - cron: '0 * * * *'
+  schedule:
+    # 1時間ごとに実行（JST の毎時0分）
+    - cron: '0 * * * *'
   # 手動実行も可能
   workflow_dispatch:
 
@@ -22,6 +22,7 @@ jobs:
       - name: 依存パッケージをインストール
         run: |
           pip install -r requirements.txt
+          pip install requests
 
       - name: 既知ツイートデータのキャッシュを復元
         uses: actions/cache@v4
@@ -39,7 +40,8 @@ jobs:
         env:
           DISCORD_TWITTER_WEBHOOK_URL: ${{ secrets.DISCORD_TWITTER_WEBHOOK_URL }}
           TWITTER_USERNAME: ${{ secrets.TWITTER_USERNAME }}
-          TWITTER_RSS_URL: ${{ secrets.TWITTER_RSS_URL }}
+          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+          RAPIDAPI_HOST: ${{ secrets.RAPIDAPI_HOST }}
           GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
           GOOGLE_SERVICE_ACCOUNT_FILE: service_account.json
         run: |
