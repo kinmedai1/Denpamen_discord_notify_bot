@@ -17,21 +17,19 @@ logger = logging.getLogger(__name__)
 class TwitterChecker:
     """RapidAPI 経由で Twitter アカウントのツイートを取得するクラス"""
 
-    def __init__(self, username: str, rapidapi_key: str, rapidapi_host: str):
+    def __init__(self, username: str, rapidapi_key: str, rapidapi_host: str, api_url: Optional[str] = None):
         """
         Args:
             username: Twitterユーザー名（@なし）
             rapidapi_key: RapidAPI の X-RapidAPI-Key
-            rapidapi_host: RapidAPI の X-RapidAPI-Host (例: twitter154.p.rapidapi.com)
+            rapidapi_host: RapidAPI の X-RapidAPI-Host
+            api_url: APIのエンドポイントURL
         """
         self.username = username
         self.rapidapi_key = rapidapi_key
         self.rapidapi_host = rapidapi_host
 
-        # Twitter154 などのエンドポイント
-        # ホスト名によってURLを可変にする等の工夫も可能だが、
-        # 今回は代表的な Twitter154 等のフォーマットを前提とする
-        self.api_url = f"https://{self.rapidapi_host}/user/tweets"
+        self.api_url = api_url or f"https://{self.rapidapi_host}/user-tweets"
 
     def fetch_tweets(self) -> list[dict]:
         """
@@ -63,7 +61,9 @@ class TwitterChecker:
         
         querystring = {
             "username": self.username,
+            "user": self.username,
             "limit": "20",
+            "count": "20",
             "include_replies": "false",
             "include_pinned": "false"
         }

@@ -353,7 +353,8 @@ def main():
     webhook_url = os.getenv("DISCORD_TWITTER_WEBHOOK_URL")
     username = os.getenv("TWITTER_USERNAME")
     rapidapi_key = os.getenv("RAPIDAPI_KEY")
-    rapidapi_host = os.getenv("RAPIDAPI_HOST", "twitter154.p.rapidapi.com")
+    rapidapi_host = os.getenv("RAPIDAPI_HOST", "twitter241.p.rapidapi.com")
+    rapidapi_url = os.getenv("RAPIDAPI_URL")
 
     if not webhook_url:
         logger.error("❌ DISCORD_TWITTER_WEBHOOK_URL が設定されていません")
@@ -375,7 +376,7 @@ def main():
 
     # 2. ツイートを取得
     logger.info(f"🐦 Twitter情報の取得を開始... (@{username})")
-    checker = TwitterChecker(username, rapidapi_key, rapidapi_host)
+    checker = TwitterChecker(username, rapidapi_key, rapidapi_host, rapidapi_url)
     current_tweets = checker.fetch_tweets()
 
     if not current_tweets:

@@ -611,7 +611,7 @@ on:
 ## 11. 公式Twitter新着通知の設定（オプション）
 
 公式Twitterアカウント（@denpaningen）の新着ツイートを1時間ごとにチェックし、新着があればDiscordに通知する機能です。
-現在は無料で安定取得可能な RapidAPI（例：Twitter154）を利用します。
+現在は無料で安定取得可能な RapidAPI（例：Twitter241）を利用します。
 
 ### 11.1 専用チャンネルの作成と Webhook 設定
 
@@ -621,15 +621,15 @@ on:
 
 ### 11.2 RapidAPI の API キー取得
 
-無料枠のあるサードパーティAPI（推奨: **Twitter154**）を使用します。
+無料枠のあるサードパーティAPI（推奨: **Twitter241**）を使用します。
 
 1. [RapidAPI](https://rapidapi.com/) にアクセスしてアカウント作成＆ログイン。
-2. 検索バーで `Twitter154` を検索（または [こちら](https://rapidapi.com/alexeyza/api/twitter154) にアクセス）。
+2. 検索バーで `Twitter241` を検索。
 3. **「Subscribe to Test」** または **「Pricing」** から「Basic（Free）」プランを選択してサブスクライブ開始。
 4. **「Endpoints」** タブに戻り、中央付近の `User Tweets` などをクリック。
 5. 右側の **Code Snippets** 内のヘッダー情報から以下をコピーまたはメモ：
    - `X-RapidAPI-Key` の値（例: `abc123def456...`）
-   - `X-RapidAPI-Host` の値（例: `twitter154.p.rapidapi.com`）
+   - `X-RapidAPI-Host` の値（例: `twitter241.p.rapidapi.com`）
 
 ### 11.3 GitHub Secrets の設定
 
@@ -640,7 +640,7 @@ on:
 | `DISCORD_TWITTER_WEBHOOK_URL` | 手順11.1でコピーしたWebhook URL |
 | `TWITTER_USERNAME` | `denpaningen`（@なし） |
 | `RAPIDAPI_KEY` | 手順11.2で取得した `X-RapidAPI-Key` |
-| `RAPIDAPI_HOST` | 手順11.2で取得した `X-RapidAPI-Host`（例: `twitter154.p.rapidapi.com`） |
+| `RAPIDAPI_HOST` | 手順11.2で取得した `X-RapidAPI-Host`（例: `twitter241.p.rapidapi.com`） |
 
 ### 11.4 動作の仕組み
 
