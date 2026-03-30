@@ -1,9 +1,9 @@
 name: 🐦 Twitter新着ツイート通知
 
 on:
-  schedule:
-    # 1時間ごとに実行（JST の毎時0分）
-    - cron: '0 * * * *'
+  # schedule:
+  #   # 1時間ごとに実行（JST の毎時0分）
+  #   - cron: '0 * * * *'
   # 手動実行も可能
   workflow_dispatch:
 
