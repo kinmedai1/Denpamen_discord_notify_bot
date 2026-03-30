@@ -610,7 +610,7 @@ on:
 
 ## 11. 公式Twitter新着通知の設定（オプション）
 
-公式Twitterアカウント（@denpaningen）の新着ツイートを1時間ごとにチェックし、新着があればDiscordに通知する機能です。
+公式Twitterアカウント（@denpaningen）の新着ツイートを3時間ごとにチェックし、新着があればDiscordに通知する機能です。
 現在は無料で安定取得可能な RapidAPI（例：Twitter241）を利用します。
 
 ### 11.1 専用チャンネルの作成と Webhook 設定
@@ -638,13 +638,13 @@ on:
 | Secret名 | 値 |
 |-----------|----|
 | `DISCORD_TWITTER_WEBHOOK_URL` | 手順11.1でコピーしたWebhook URL |
-| `TWITTER_USERNAME` | `denpaningen`（@なし） |
+| `TWITTER_USERNAME` | `denpaningen`（@なし） または 数値ID |
 | `RAPIDAPI_KEY` | 手順11.2で取得した `X-RapidAPI-Key` |
 | `RAPIDAPI_HOST` | 手順11.2で取得した `X-RapidAPI-Host`（例: `twitter241.p.rapidapi.com`） |
 
 ### 11.4 動作の仕組み
 
-- **定期実行**: 1時間ごとに RapidAPI を通じてツイート一覧を取得します（GitHub Actions `twitter_notify.yml`）
+- **定期実行**: 3時間ごとに RapidAPI を通じてツイート一覧を取得します（GitHub Actions `twitter_notify.yml`）
 - **新着通知**: 新しいツイートが検出されると、指定したチャンネルに通知が届き、スケジュールへ自動登録可能なものは登録されます。
 - **初回実行時**: 初回実行時は、全ての既存ツイートを「既知」として登録するため、通知は送信されません。
 
