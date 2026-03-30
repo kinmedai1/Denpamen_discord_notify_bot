@@ -15,7 +15,7 @@ from logging.handlers import TimedRotatingFileHandler
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.utils.twitter_checker import TwitterChecker
-from src.utils.event_date_parser import extract_event_title, extract_event_dates, periods_overlap
+from src.utils.event_date_parser import extract_event_title, extract_event_dates, periods_overlap, normalize_title
 from src.utils.sheets_manager import SheetsManager
 
 # ロギング設定
@@ -219,8 +219,11 @@ def _is_duplicate_event(
         重複する場合 True
     """
     for schedule in existing_schedules:
-        existing_title = schedule.get("title", "")
-        if existing_title != title:
+        # スプレッドシート側の過去の登録名に「」が含まれている可能性も考慮し、双方を比較時に正規化
+        existing_title = normalize_title(schedule.get("title", ""))
+        target_title = normalize_title(title)
+        
+        if existing_title != target_title:
             continue
 
         # 同名イベントが見つかった → 期間の重複チェック

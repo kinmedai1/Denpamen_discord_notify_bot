@@ -95,17 +95,15 @@ HALF_TO_FULL = str.maketrans({
 def normalize_title(title: str) -> str:
     """
     タイトルの正規化処理。
-    半角の！?を全角に変換し、前後の空白を除去する。
-
-    Args:
-        title: 正規化前のタイトル
-
-    Returns:
-        正規化後のタイトル
+    半角の！?を全角に変換し、前後の空白や装飾カッコを除去する。
     """
+    if not title:
+        return ""
     title = title.strip()
     title = title.translate(HALF_TO_FULL)
-    return title
+    # 前後の装飾カッコを除去
+    title = title.strip('「」『』【】()（）<>＜＞"\' 　')
+    return title.strip()
 
 
 def extract_event_title(text: str) -> Optional[str]:
