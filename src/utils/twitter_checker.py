@@ -86,8 +86,12 @@ class TwitterChecker:
         if isinstance(data, list):
             tweets_data = data
         elif isinstance(data, dict):
+            # Twitter241 などの GraphQL Timeline 形式
+            if "result" in data and "timeline" in data["result"]:
+                tweets_data = self._extract_graphql_tweets(data)
+            
             # Twitter154 などは {"results": [...]} などの形で返すことがある
-            if "results" in data:
+            elif "results" in data:
                 tweets_data = data["results"]
             elif "data" in data and "tweets" in data["data"]:
                 tweets_data = data["data"]["tweets"]
@@ -153,11 +157,59 @@ class TwitterChecker:
                     "author": author,
                 })
             except Exception as e:
-                logger.debug(f"ツイートデータのパース中にエラー: {e}")
-                continue
+                logger.error(f"ツイートパース中にエラー: {e}")
 
-        logger.info(f"RapidAPI から {len(tweets)} 件のツイートを取得しました")
+        logger.info(f"{len(tweets)} 件のツイート情報を抽出しました")
         return tweets
+
+    def _extract_graphql_tweets(self, data: dict) -> list[dict]:
+        """TwitterのGraphQL形式(Result -> Timeline -> Instructions)からツイートを取り出す"""
+        tweets_data = []
+        try:
+            instructions = data.get("result", {}).get("timeline", {}).get("instructions", [])
+            for inst in instructions:
+                # TimelineAddEntries に複数ツイートが含まれる
+                if inst.get("type") == "TimelineAddEntries" and "entries" in inst:
+                    for entry in inst["entries"]:
+                        content = entry.get("content", {})
+                        if content.get("entryType") == "TimelineTimelineItem":
+                            tweet_res = content.get("itemContent", {}).get("tweet_results", {}).get("result", {})
+                            self._append_graphql_tweet(tweet_res, tweets_data)
+                
+                # TimelinePinEntry など単独のツイートが含まれる
+                elif "entry" in inst:
+                    content = inst["entry"].get("content", {})
+                    if content.get("entryType") == "TimelineTimelineItem":
+                        tweet_res = content.get("itemContent", {}).get("tweet_results", {}).get("result", {})
+                        self._append_graphql_tweet(tweet_res, tweets_data)
+        except Exception as e:
+            logger.debug(f"GraphQL解析エラー: {e}")
+            
+        return tweets_data
+
+    def _append_graphql_tweet(self, tweet_res: dict, tweets_data: list):
+        if not tweet_res:
+            return
+            
+        # リツイートなどで別のキーに入っている場合
+        if tweet_res.get("__typename") == "TweetWithVisibilityResults":
+            tweet_res = tweet_res.get("tweet", {})
+
+        legacy = tweet_res.get("legacy")
+        if not legacy:
+            return
+            
+        # IDが legacy の中にない場合（通常 core のほうにあるが、legacy にセットしておく）
+        if "id_str" not in legacy:
+            legacy["id_str"] = tweet_res.get("rest_id", "")
+            
+        # user情報をマージしておく (既存のパース処理をそのまま活かすため)
+        core = tweet_res.get("core", {})
+        user_legacy = core.get("user_results", {}).get("result", {}).get("legacy", {})
+        if user_legacy:
+            legacy["user"] = user_legacy
+            
+        tweets_data.append(legacy)
 
     def _strip_html(self, html_text: str) -> str:
         """HTML タグを除去してプレーンテキストにする"""
