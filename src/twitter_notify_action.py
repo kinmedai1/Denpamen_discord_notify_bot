@@ -353,8 +353,10 @@ def main():
     webhook_url = os.getenv("DISCORD_TWITTER_WEBHOOK_URL")
     username = os.getenv("TWITTER_USERNAME")
     rapidapi_key = os.getenv("RAPIDAPI_KEY")
-    rapidapi_host = os.getenv("RAPIDAPI_HOST", "twitter241.p.rapidapi.com")
-    rapidapi_url = os.getenv("RAPIDAPI_URL")
+    
+    # GitHub Actions で未設定の変数は空文字 "" になるため、or 演算子でフォールバックさせる
+    rapidapi_host = os.getenv("RAPIDAPI_HOST", "") or "twitter241.p.rapidapi.com"
+    rapidapi_url = os.getenv("RAPIDAPI_URL", "")
 
     if not webhook_url:
         logger.error("❌ DISCORD_TWITTER_WEBHOOK_URL が設定されていません")
