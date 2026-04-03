@@ -99,32 +99,38 @@ def generate_gantt_chart(
 
     # 日付をパースして有効なスケジュールのみ抽出
     parsed_schedules = []
+    
+    def parse_date_str(d_str: str) -> Optional[datetime]:
+        d_str = d_str.strip().replace("/", "-")
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(d_str, fmt)
+            except ValueError:
+                pass
+        # フォールバック: パースできなかった場合は先頭10文字として処理
+        try:
+            return datetime.strptime(d_str[:10], "%Y-%m-%d")
+        except ValueError:
+            return None
+
     for s in schedules:
         try:
-            start_str = str(s["start_date"]).strip()
-            end_str = str(s.get("end_date", s["start_date"])).strip()
+            start_str = str(s.get("start_date", ""))
+            end_str = str(s.get("end_date", start_str))
 
-            # 時間付き ("2026-03-15 14:00") or 日付のみ ("2026-03-15")
-            for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
-                try:
-                    start = datetime.strptime(start_str, fmt)
-                    break
-                except ValueError:
-                    continue
-            else:
+            start = parse_date_str(start_str)
+            if not start:
                 continue
 
-            for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
-                try:
-                    end = datetime.strptime(end_str, fmt) if end_str else start
-                    # 日付のみの指定の場合、その日を含めるために1日足す
-                    if fmt == "%Y-%m-%d":
-                        end += timedelta(days=1)
-                    break
-                except ValueError:
-                    continue
-            else:
+            end = parse_date_str(end_str)
+            if not end:
                 end = start
+            
+            # 日付のみの指定（00:00:00等）の場合、その日を含めるために1日足す
+            if end.hour == 0 and end.minute == 0:
+                # 文字列の長さが10（YYYY-MM-DD）や、手動で時間を入れていない場合を考慮
+                if ":" not in end_str:
+                    end += timedelta(days=1)
 
             # 同日の場合は1日分の幅を持たせる
             if end <= start:
@@ -135,7 +141,7 @@ def generate_gantt_chart(
                 "end": end,
                 "group": s.get("group", s.get("title", "無題")),
             })
-        except (ValueError, KeyError):
+        except Exception:
             continue
 
     if not parsed_schedules:
