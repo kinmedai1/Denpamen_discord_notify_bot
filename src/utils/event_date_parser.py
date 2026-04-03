@@ -71,6 +71,18 @@ DATE_PATTERN_DAY_ONLY = re.compile(
     r'(?:明日|明後日|あす|あさって)\s*(\d{1,2})日'
 )
 
+# 日付パターン: DD日（月なし、前置詞なし）
+# 「4月10日(金) 15時から23日(木) 14時59分まで」の「23日」のような場合
+# MM月DD日パターンにマッチしない孤立した「DD日」を検出する
+DATE_PATTERN_DAY_BARE = re.compile(
+    r'(?<!\d月)(?<!\d)(\d{1,2})日'
+)
+
+# テキスト中に出現する「MM月」パターン（月の推定用）
+MONTH_PATTERN = re.compile(
+    r'(\d{1,2})月'
+)
+
 # 時刻パターン: HH:MM or HH時MM分 or HH時
 TIME_PATTERN = re.compile(
     r'(\d{1,2})[:時](\d{2})?分?'
@@ -371,7 +383,105 @@ def _extract_all_dates(text: str, reference_date: datetime) -> list[dict]:
         except ValueError:
             continue
 
+    # DD日（月なし・前置詞なし）パターン: 「23日(木)」等
+    # 他のパターン（MM月DD日、明日DD日）で既に抽出済みの位置は除外する
+    already_matched_positions = {r["pos"] for r in results}
+    for match in DATE_PATTERN_DAY_BARE.finditer(text):
+        # 既に他のパターンでマッチ済みの位置ならスキップ
+        if _is_already_matched(match.start(), results):
+            continue
+
+        # MM月DD日 パターンの一部（DD日部分）としてマッチしていないかチェック
+        # 直前に「月」があればスキップ（MM月DD日として既に処理済み）
+        if match.start() >= 2:
+            preceding_char = text[match.start() - 1:match.start()]
+            if preceding_char == '月':
+                continue
+
+        try:
+            day = int(match.group(1))
+            if not (1 <= day <= 31):
+                continue
+
+            # ---- 月の推定ロジック ----
+            # テキスト中でこの位置より前に出現した最も近い「MM月」から月を推定
+            month = _infer_month_from_context(text, match.start(), reference_date)
+            year = reference_date.year
+
+            dt = datetime(year, month, day)
+
+            # 基準日より過去の場合は翌年
+            if dt.date() < reference_date.date():
+                dt = datetime(year + 1, month, day)
+
+            # 日付の直後に時刻があるかチェック
+            dt = _try_attach_time(text, match.end(), dt)
+
+            results.append({
+                "date": dt,
+                "pos": match.start(),
+                "text": match.group(0),
+            })
+        except ValueError:
+            continue
+
     return results
+
+
+def _is_already_matched(pos: int, results: list[dict]) -> bool:
+    """
+    指定位置が既に他のパターンで抽出済みの日付範囲内かどうかチェックする。
+
+    Args:
+        pos: チェック対象のテキスト位置
+        results: 既に抽出済みの日付リスト
+
+    Returns:
+        既に抽出済みの場合 True
+    """
+    for r in results:
+        r_start = r["pos"]
+        r_end = r_start + len(r["text"])
+        # 抽出済みの日付テキストの範囲内に含まれていたらスキップ
+        if r_start <= pos < r_end:
+            return True
+    return False
+
+
+def _infer_month_from_context(text: str, pos: int, reference_date: datetime) -> int:
+    """
+    テキスト中の指定位置より前にある最も近い「MM月」から月を推定する。
+    見つからない場合は基準日の月を返す。
+
+    例: 「4月10日(金) 15時から23日(木) 14時59分まで」
+        → 「23日」の位置から前を見ると「4月」が見つかるので、4月と推定
+
+    Args:
+        text: テキスト
+        pos: 対象の「DD日」の位置
+        reference_date: 基準日時（フォールバック用）
+
+    Returns:
+        推定された月（1-12）
+    """
+    best_month = None
+    best_distance = float('inf')
+
+    for match in MONTH_PATTERN.finditer(text):
+        month_end = match.end()
+        # 「MM月」が対象位置より前にある場合のみ
+        if month_end <= pos:
+            distance = pos - month_end
+            if distance < best_distance:
+                best_distance = distance
+                month_val = int(match.group(1))
+                if 1 <= month_val <= 12:
+                    best_month = month_val
+
+    if best_month is not None:
+        return best_month
+
+    return reference_date.month
 
 
 def _is_part_of_full_date(text: str, pos: int) -> bool:
