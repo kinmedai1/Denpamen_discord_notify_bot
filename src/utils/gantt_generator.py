@@ -14,6 +14,9 @@ import io
 import json
 import os
 import platform
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _setup_japanese_font():
@@ -64,6 +67,45 @@ def _load_config() -> dict:
             return config.get("gantt_chart", {})
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
+
+
+def _remove_contained_schedules(schedules: list[dict]) -> list[dict]:
+    """
+    同一グループ内で、別のスケジュールに完全包含されるものを除去する。
+    公式サイトとTwitterの両方から登録された重複イベント対策。
+
+    例: グループ「スプリングイベント」に以下の2件がある場合:
+      - A: 04/08 15:00 → 04/15 14:59
+      - B: 04/15 14:59 → 04/15 14:59 (start == end)
+    → BはAに包含されるため除去され、Aのみ残る。
+    """
+    from collections import defaultdict
+
+    # グループごとに分類
+    groups = defaultdict(list)
+    for s in schedules:
+        groups[s["group"]].append(s)
+
+    result = []
+    for group, items in groups.items():
+        if len(items) <= 1:
+            result.extend(items)
+            continue
+
+        for s in items:
+            is_contained = False
+            for other in items:
+                if s is other:
+                    continue
+                # sがotherに完全に包含されているかチェック
+                if (other["start"] <= s["start"] and s["end"] <= other["end"]
+                        and not (other["start"] == s["start"] and other["end"] == s["end"])):
+                    is_contained = True
+                    break
+            if not is_contained:
+                result.append(s)
+
+    return result
 
 
 def generate_gantt_chart(
@@ -125,14 +167,7 @@ def generate_gantt_chart(
             end = parse_date_str(end_str)
             if not end:
                 end = start
-            
-            # 日付のみの指定（時刻なし）の場合はそのまま00:00とし、
-            # バーがその日のグリッド線で止まるようにする
-            # （加算すると翌日のグリッド線まで伸びてしまうため）
 
-            # 同日の場合は1日分の幅を持たせる
-            if end <= start:
-                end = start + timedelta(days=1)
             parsed_schedules.append({
                 "title": s.get("title", "無題"),
                 "start": start,
@@ -144,6 +179,15 @@ def generate_gantt_chart(
 
     if not parsed_schedules:
         return _generate_empty_chart(title)
+
+    # 同一グループ内で、別のスケジュールに完全包含されるものを除去する
+    # （公式サイトとTwitterの両方から登録された重複イベント対策）
+    parsed_schedules = _remove_contained_schedules(parsed_schedules)
+
+    # 同日（start==end）の場合は1日分の幅を持たせる
+    for s in parsed_schedules:
+        if s["end"] <= s["start"]:
+            s["end"] = s["start"] + timedelta(days=1)
 
     # 日付でソート（開始日が早い順）
     parsed_schedules.sort(key=lambda x: x["start"])

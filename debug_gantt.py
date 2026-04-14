@@ -1,4 +1,4 @@
-"""ガントチャートのデバッグ: スケジュールデータを確認する"""
+"""ガントチャートのデバッグ: スケジュールデータのフォーマットを確認する"""
 import os
 import sys
 from dotenv import load_dotenv
@@ -22,13 +22,13 @@ schedules = manager.get_all_schedules()
 print(f"\n=== 全スケジュール ({len(schedules)}件) ===\n")
 for s in schedules:
     title = s.get("title", "")
-    start = s.get("start_date", "")
-    end = s.get("end_date", "")
-    group = s.get("group", "")
-    assignee = s.get("assignee", "")
-    print(f"  タイトル: {title}")
-    print(f"  開始日  : [{start}] (len={len(str(start))})")
-    print(f"  終了日  : [{end}] (len={len(str(end))})")
-    print(f"  グループ: {group}")
-    print(f"  担当者  : {assignee}")
-    print(f"  ---")
+    # スプリングイベントのみ詳細表示
+    if "スプリング" in title or "spring" in title.lower():
+        start = s.get("start_date", "")
+        end = s.get("end_date", "")
+        print(f"  ★ タイトル : {title}")
+        print(f"     start_date: [{start}] (type={type(start).__name__}, len={len(str(start))})")
+        print(f"     end_date  : [{end}] (type={type(end).__name__}, len={len(str(end))})")
+        print(f"     repr(start): {repr(start)}")
+        print(f"     repr(end)  : {repr(end)}")
+        print()
