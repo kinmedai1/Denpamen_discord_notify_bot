@@ -126,11 +126,9 @@ def generate_gantt_chart(
             if not end:
                 end = start
             
-            # 日付のみの指定（00:00:00等）の場合、その日を含めるために23:59に設定
-            # （1日加算すると翌日のグリッド線までバーが伸びてしまうため）
-            if end.hour == 0 and end.minute == 0:
-                if ":" not in end_str:
-                    end = end.replace(hour=23, minute=59)
+            # 日付のみの指定（時刻なし）の場合はそのまま00:00とし、
+            # バーがその日のグリッド線で止まるようにする
+            # （加算すると翌日のグリッド線まで伸びてしまうため）
 
             # 同日の場合は1日分の幅を持たせる
             if end <= start:
