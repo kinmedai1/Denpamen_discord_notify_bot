@@ -33,6 +33,16 @@ PATTERN_BRACKET_EVENT = re.compile(
     r'「([^」]+)」[^\n]*?(?:開催|オープン)'
 )
 
+# パターン2b: 連続する「◯◯」「◯◯」...開催/オープン (複数ステージ一括キャプチャ)
+# 例: 「幻帝のどうくつ 弐」「幻帝のどうくつ 破」がオープン
+# 連続する「」ブロック全体をキャプチャし、後で個別タイトルに分解する
+PATTERN_MULTI_BRACKET_EVENT = re.compile(
+    r'((?:「[^」]+」\s*){2,})[^\n]*?(?:開催|オープン)'
+)
+
+# 「」内のテキストを個別抽出するパターン
+PATTERN_BRACKET_CONTENT = re.compile(r'「([^」]+)」')
+
 # パターン3: 開催中の ◯◯ は/まで (インラインパターン)
 # 例: "開催中の ハイスコアチャレンジ! は明日11日まで"
 PATTERN_INLINE_EVENT = re.compile(
@@ -118,6 +128,51 @@ def normalize_title(title: str) -> str:
     return title.strip()
 
 
+def _extract_common_prefix(titles: list[str]) -> str | None:
+    """
+    複数のイベントタイトルから共通プレフィックスを抽出する。
+
+    共通部分の末尾の空白・区切り文字を除去し、意味のあるタイトルを返す。
+    最低2文字以上の共通部分がない場合は None を返す。
+
+    例:
+      - [「幻帝のどうくつ 弐」, 「幻帝のどうくつ 破」] → 「幻帝のどうくつ」
+      - [「電波人間コロシアム A」, 「電波人間コロシアム B」] → 「電波人間コロシアム」
+      - [「イベントA」, 「まったく異なるイベント」] → None
+
+    Args:
+        titles: イベントタイトルのリスト（2つ以上）
+
+    Returns:
+        共通プレフィックス。見つからない場合は None。
+    """
+    if not titles or len(titles) < 2:
+        return None
+
+    # os.path.commonprefix と同等の文字単位の共通プレフィックスを取得
+    prefix = titles[0]
+    for title in titles[1:]:
+        # 文字単位で一致する部分を取得
+        new_prefix = []
+        for c1, c2 in zip(prefix, title):
+            if c1 == c2:
+                new_prefix.append(c1)
+            else:
+                break
+        prefix = "".join(new_prefix)
+        if not prefix:
+            return None
+
+    # 末尾の空白・区切り文字を除去（「幻帝のどうくつ 」→「幻帝のどうくつ」）
+    prefix = prefix.rstrip(" 　・:：-ー")
+
+    # 最低2文字以上の共通部分が必要
+    if len(prefix) < 2:
+        return None
+
+    return prefix
+
+
 def extract_event_title(text: str) -> Optional[str]:
     """
     ツイート本文からイベントタイトルを抽出する。
@@ -147,6 +202,27 @@ def extract_event_title(text: str) -> Optional[str]:
             return title
 
     # パターン2: 「◯◯」...開催/オープン (括弧パターン)
+    # まず複数ステージの一括パターン（2b）を試行し、次に単一パターン（2）にフォールバック
+
+    # パターン2b: 連続する「◯◯」「◯◯」...開催/オープン
+    multi_match = PATTERN_MULTI_BRACKET_EVENT.search(text)
+    if multi_match:
+        # 連続する「」ブロックから個別タイトルを抽出
+        bracket_block = multi_match.group(1)
+        individual_titles = PATTERN_BRACKET_CONTENT.findall(bracket_block)
+        titles = [normalize_title(t) for t in individual_titles if normalize_title(t)]
+        if len(titles) >= 2:
+            # 複数マッチ → 共通プレフィックスを抽出
+            common = _extract_common_prefix(titles)
+            if common:
+                logger.info(f"イベントタイトルを抽出（括弧パターン・共通プレフィックス）: 「{common}」（元: {titles}）")
+                return common
+            else:
+                # 共通プレフィックスがない場合は最初のタイトルを使用
+                logger.info(f"イベントタイトルを抽出（括弧パターン・共通なし）: 「{titles[0]}」")
+                return titles[0]
+
+    # パターン2: 単一の「◯◯」...開催/オープン
     match = PATTERN_BRACKET_EVENT.search(text)
     if match:
         title = normalize_title(match.group(1))
