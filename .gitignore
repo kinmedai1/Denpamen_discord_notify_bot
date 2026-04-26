@@ -44,3 +44,8 @@ desktop.ini
 # データディレクトリ（ディレクトリは保持し中身は無視）
 data/*
 !data/.gitkeep
+
+# デバッグ・テストスクリプト
+debug_gantt.py
+test_*.py
+

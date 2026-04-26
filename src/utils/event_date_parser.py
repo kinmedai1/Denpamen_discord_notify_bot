@@ -233,7 +233,21 @@ def extract_event_title(text: str) -> Optional[str]:
     # パターン3: 開催中の ◯◯ は/まで (インラインパターン)
     match = PATTERN_INLINE_EVENT.search(text)
     if match:
-        title = normalize_title(match.group(1))
+        raw_title = match.group(1)
+        # マッチしたテキストに複数の「」括弧が含まれている場合、共通プレフィックスを抽出
+        bracket_titles = PATTERN_BRACKET_CONTENT.findall(raw_title)
+        if len(bracket_titles) >= 2:
+            titles = [normalize_title(t) for t in bracket_titles if normalize_title(t)]
+            if len(titles) >= 2:
+                common = _extract_common_prefix(titles)
+                if common:
+                    logger.info(f"イベントタイトルを抽出（インラインパターン・共通プレフィックス）: 「{common}」（元: {titles}）")
+                    return common
+                else:
+                    # 共通プレフィックスがない場合は最初のタイトルを使用
+                    logger.info(f"イベントタイトルを抽出（インラインパターン・共通なし）: 「{titles[0]}」")
+                    return titles[0]
+        title = normalize_title(raw_title)
         if title:
             logger.info(f"イベントタイトルを抽出（インラインパターン）: 「{title}」")
             return title
