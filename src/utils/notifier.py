@@ -40,6 +40,9 @@ class ScheduleNotifier:
         # 通知済みスケジュールを追跡（重複防止）
         self._notified_today = set()
         self._last_reset_date = None
+        # エラー時のバックオフ制御
+        self._consecutive_errors = 0
+        self._error_backoff_until = None
 
     def _load_config(self) -> dict:
         """config.json を読み込む"""
@@ -68,6 +71,10 @@ class ScheduleNotifier:
     async def check_notifications(self):
         """毎分実行: スケジュール通知をチェックする"""
         try:
+            # 連続エラー時のバックオフ（エラー後は数分スキップ）
+            if self._error_backoff_until and datetime.now() < self._error_backoff_until:
+                return
+
             now = datetime.now()
             today = now.date()
 
@@ -86,8 +93,22 @@ class ScheduleNotifier:
             # 2. リマインダー通知のチェック
             await self._check_reminders(channel, now)
 
+            # 成功時はエラーカウンタをリセット
+            self._consecutive_errors = 0
+            self._error_backoff_until = None
+
         except Exception as e:
-            logger.error(f"通知チェック中にエラーが発生しました: {e}")
+            self._consecutive_errors += 1
+            # バックオフ時間を計算（最大10分）
+            backoff_minutes = min(self._consecutive_errors * 2, 10)
+            self._error_backoff_until = datetime.now() + timedelta(minutes=backoff_minutes)
+
+            if self._consecutive_errors <= 3 or self._consecutive_errors % 10 == 0:
+                # 最初の3回と、その後は10回ごとにログ出力（ログ爆発防止）
+                logger.error(
+                    f"通知チェック中にエラーが発生しました（連続{self._consecutive_errors}回目、"
+                    f"次回チェックまで{backoff_minutes}分待機）: {e}"
+                )
 
     @check_notifications.before_loop
     async def before_check(self):

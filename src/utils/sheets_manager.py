@@ -10,10 +10,18 @@ from typing import Optional
 import uuid
 import os
 import json
+import time
+import logging
+
+logger = logging.getLogger(__name__)
+
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
+
+# キャッシュの有効期間（秒）
+CACHE_TTL_SECONDS = 300  # 5分
 
 # スプレッドシートのカラム定義
 COLUMNS = ["ID", "タイトル", "開始日", "終了日", "説明", "担当者", "作成日"]
@@ -32,6 +40,9 @@ class SheetsManager:
         self.service_account_file = service_account_file
         self._client = None
         self._sheet = None
+        # APIレスポンスキャッシュ（レート制限対策）
+        self._cache_data: list[dict] | None = None
+        self._cache_timestamp: float = 0.0
 
     def _connect(self):
         """Google Sheets に接続する（遅延初期化）"""
@@ -90,6 +101,9 @@ class SheetsManager:
         row = [schedule_id, title, start_date, end_date, description, assignee, created_at]
         self._sheet.append_row(row, value_input_option="USER_ENTERED")
 
+        # データ変更があったのでキャッシュを無効化
+        self.invalidate_cache()
+
         return {
             "id": schedule_id,
             "title": title,
@@ -100,8 +114,21 @@ class SheetsManager:
             "created_at": created_at,
         }
 
+    def invalidate_cache(self):
+        """キャッシュを無効化する（データ変更時に呼び出す）"""
+        self._cache_data = None
+        self._cache_timestamp = 0.0
+        logger.debug("スケジュールキャッシュを無効化しました")
+
     def get_all_schedules(self) -> list[dict]:
-        """全スケジュールを取得する"""
+        """全スケジュールを取得する（キャッシュ付き）"""
+        now = time.time()
+
+        # キャッシュが有効ならAPIを呼ばずに返す
+        if self._cache_data is not None and (now - self._cache_timestamp) < CACHE_TTL_SECONDS:
+            logger.debug("キャッシュからスケジュールを返却（残り %.0f秒）", CACHE_TTL_SECONDS - (now - self._cache_timestamp))
+            return self._cache_data
+
         self._connect()
 
         records = self._sheet.get_all_records()
@@ -110,6 +137,11 @@ class SheetsManager:
         # 定期イベント（設定ファイルから）を展開して60日分追加
         recurring = self._get_recurring_events(days_ahead=60)
         schedules.extend(recurring)
+
+        # キャッシュを更新
+        self._cache_data = schedules
+        self._cache_timestamp = now
+        logger.info("Google Sheets APIからスケジュールを取得しキャッシュしました（%d件）", len(schedules))
         
         return schedules
 
@@ -239,6 +271,8 @@ class SheetsManager:
         cell = self._sheet.find(schedule_id)
         if cell and cell.col == 1:  # ID列（A列）にある場合のみ
             self._sheet.delete_rows(cell.row)
+            # データ変更があったのでキャッシュを無効化
+            self.invalidate_cache()
             return True
         return False
 
